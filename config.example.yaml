@@ -1,0 +1,44 @@
+# Ultra Engineer Configuration
+
+# Git provider: gitea, github, or gitlab
+provider: gitea
+
+# How often to poll for new issues
+poll_interval: 60s
+
+# Label that triggers processing
+trigger_label: ai-implement
+
+# Gitea configuration
+gitea:
+  url: https://gitea.example.com
+  token: ${GITEA_TOKEN}
+  # Or use tea CLI's existing auth
+
+# GitHub configuration
+github:
+  token: ${GITHUB_TOKEN}
+  # Or use gh CLI's existing auth
+
+# GitLab configuration
+gitlab:
+  url: https://gitlab.example.com
+  token: ${GITLAB_TOKEN}
+  # Or use glab CLI's existing auth
+
+# Claude Code settings
+claude:
+  command: claude          # Path to claude CLI
+  timeout: 30m             # Timeout per invocation
+  review_cycles: 5         # Number of review iterations (always runs this many)
+
+# Retry settings
+retry:
+  max_attempts: 3          # Max retries for transient errors
+  backoff_base: 10s        # Initial backoff duration
+  rate_limit_retry: 5m     # Retry interval when rate limited
+
+# Repository settings (can be overridden per-repo)
+defaults:
+  base_branch: main        # Default branch for PRs
+  auto_merge: true         # Auto-merge when provider says mergeable
