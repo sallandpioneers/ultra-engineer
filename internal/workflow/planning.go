@@ -3,6 +3,7 @@ package workflow
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/anthropics/ultra-engineer/internal/claude"
 	"github.com/anthropics/ultra-engineer/internal/providers"
@@ -85,6 +86,13 @@ func (p *PlanningPhase) RunFullReviewCycle(ctx context.Context, initialPlan stri
 	var lastSessionID string
 
 	for i := 1; i <= p.reviewCycles; i++ {
+		// Check for context cancellation before each iteration
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
+
 		if progressCallback != nil {
 			progressCallback(i)
 		}
@@ -164,6 +172,13 @@ Output the marker first, then the complete updated plan.`, plan, feedback)
 		updatedPlan = removeMarker(response, "MINOR_CHANGES")
 	}
 
+	// Validate that we have a non-empty plan
+	updatedPlan = strings.TrimSpace(updatedPlan)
+	if updatedPlan == "" {
+		// If Claude only returned the marker without a plan, keep the original
+		updatedPlan = plan
+	}
+
 	return &PlanResult{
 		Plan:      updatedPlan,
 		SessionID: sessionID,
@@ -171,21 +186,27 @@ Output the marker first, then the complete updated plan.`, plan, feedback)
 }
 
 func containsMarker(text, marker string) bool {
-	return len(text) > 0 && (text[:min(len(text), len(marker)+50)] != "" &&
-		(len(text) >= len(marker) && text[:len(marker)] == marker) ||
-		(len(text) > len(marker)+1 && text[1:len(marker)+1] == marker))
+	if len(text) == 0 {
+		return false
+	}
+	// Check if the marker appears anywhere in the text
+	return strings.Contains(text, marker)
 }
 
 func removeMarker(text, marker string) string {
-	if len(text) > len(marker) && text[:len(marker)] == marker {
-		return text[len(marker):]
+	// Find and remove the marker from the text
+	idx := strings.Index(text, marker)
+	if idx == -1 {
+		return text
 	}
-	return text
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
+	// Remove the marker and any leading whitespace before it
+	before := strings.TrimRight(text[:idx], " \t\n")
+	after := strings.TrimSpace(text[idx+len(marker):])
+	if before == "" {
+		return after
 	}
-	return b
+	if after == "" {
+		return before
+	}
+	return before + "\n\n" + after
 }

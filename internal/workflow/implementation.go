@@ -103,6 +103,13 @@ func (i *ImplementationPhase) RunFullCodeReviewCycle(ctx context.Context, st *st
 	var lastSessionID string
 
 	for iter := 1; iter <= i.reviewCycles; iter++ {
+		// Check for context cancellation before each iteration
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
+
 		if progressCallback != nil {
 			progressCallback(iter)
 		}

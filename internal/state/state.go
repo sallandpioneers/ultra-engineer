@@ -156,12 +156,13 @@ func (s *State) SetPhase(phase Phase) {
 }
 
 // AddQA adds a Q&A entry to the history
+// Note: Does not increment QARound as that should be managed externally
+// to avoid double-increment when this is called after incrementing in the orchestrator
 func (s *State) AddQA(questions, answers string) {
 	s.QAHistory = append(s.QAHistory, claude.QAEntry{
 		Questions: questions,
 		Answers:   answers,
 	})
-	s.QARound++
 }
 
 // IncrementReviewIteration increments and returns the review iteration

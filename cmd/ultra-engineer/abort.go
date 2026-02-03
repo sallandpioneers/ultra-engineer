@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
 
 	"github.com/spf13/cobra"
 
@@ -74,8 +75,11 @@ func abortIssue(repo string, issueNum int) error {
 		return fmt.Errorf("failed to add failed label: %w", err)
 	}
 
-	// Remove trigger label
-	provider.RemoveLabel(ctx, repo, issueNum, cfg.TriggerLabel)
+	// Remove trigger label (best-effort, don't fail if it doesn't exist)
+	if err := provider.RemoveLabel(ctx, repo, issueNum, cfg.TriggerLabel); err != nil {
+		// Log but don't fail - the abort was still successful
+		fmt.Fprintf(os.Stderr, "Warning: failed to remove trigger label: %v\n", err)
+	}
 
 	fmt.Printf("Aborted processing of issue #%d\n", issueNum)
 	return nil
