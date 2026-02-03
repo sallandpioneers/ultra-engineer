@@ -24,16 +24,20 @@ If you have clarifying questions, write them to .ultra-engineer/questions.md in 
 1. [Question]
 
    A. [Option] (Recommended)
-      Pro: [one benefit]
-      Con: [one drawback]
+      Effort: [Low/Medium/High]
+      Pros: [2-3 benefits]
+      Cons: [1-2 drawbacks]
+      Files: [affected files, or "new file" if creating]
 
    B. [Option]
-      Pro: [one benefit]
-      Con: [one drawback]
+      Effort: [Low/Medium/High]
+      Pros: [2-3 benefits]
+      Cons: [1-2 drawbacks]
+      Files: [affected files]
 
    C. Other (please specify)
 
-Mark your recommended option with "(Recommended)". Include exactly one pro and one con per option. Add blank lines between options for readability.
+Mark your recommended option with "(Recommended)". Add blank lines between options.
 
 If no questions needed, write "NO_QUESTIONS_NEEDED" to .ultra-engineer/questions.md
 
