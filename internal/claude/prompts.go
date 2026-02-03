@@ -24,28 +24,23 @@ If you have clarifying questions, write them to .ultra-engineer/questions.md in 
 1. [Question]
 
    A. [Option] (Recommended)
-      Effort: [Low/Medium/High]
-      Risk: [Low/Medium/High - breaking changes, compatibility issues]
-      Pros: [2-3 benefits]
-      Cons: [1-2 drawbacks]
+      **Effort:** [Low/Medium/High]
+      **Risk:** [Low/Medium/High - breaking changes, compatibility issues]
+      **Pros:** [2-3 benefits]
+      **Cons:** [1-2 drawbacks]
 
    B. [Option]
-      Effort: [Low/Medium/High]
-      Risk: [Low/Medium/High]
-      Pros: [2-3 benefits]
-      Cons: [1-2 drawbacks]
+      **Effort:** [Low/Medium/High]
+      **Risk:** [Low/Medium/High]
+      **Pros:** [2-3 benefits]
+      **Cons:** [1-2 drawbacks]
 
    C. Other (please specify)
 
 Mark your recommended option with "(Recommended)". Add blank lines between options.
 If an option depends on another question's answer, note it (e.g., "Requires 1A").
 
-End with a summary table:
-| Question | Recommended | Why |
-|----------|-------------|-----|
-| 1 | A | [brief reason] |
-
-And a note: "If you're unsure, replying with just the recommended options (e.g., '1A, 2A, 3B') is a safe default."
+End with: "If you're unsure, replying with just the recommended options (e.g., '1A, 2A, 3B') is a safe default."
 
 If no questions needed, write "NO_QUESTIONS_NEEDED" to .ultra-engineer/questions.md
 
@@ -59,12 +54,7 @@ Then write your implementation plan to .ultra-engineer/plan.md with:
 
 	ReviewCode: `/review the code and fix all issues`,
 
-	Implement: `Implement the plan from .ultra-engineer/plan.md
-
-Issue: %s
-
-Create/modify files as specified in the plan.
-Output "IMPLEMENTATION_COMPLETE" when done.`,
+	Implement: `Implement the plan from .ultra-engineer/plan.md`,
 
 	FixCI: `CI failed. Fix the issues.
 
