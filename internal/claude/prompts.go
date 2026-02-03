@@ -27,13 +27,11 @@ If you have clarifying questions, write them to .ultra-engineer/questions.md in 
       Effort: [Low/Medium/High]
       Pros: [2-3 benefits]
       Cons: [1-2 drawbacks]
-      Files: [affected files, or "new file" if creating]
 
    B. [Option]
       Effort: [Low/Medium/High]
       Pros: [2-3 benefits]
       Cons: [1-2 drawbacks]
-      Files: [affected files]
 
    C. Other (please specify)
 
