@@ -33,32 +33,9 @@ Then write your implementation plan to .ultra-engineer/plan.md with:
 - Step-by-step approach
 - Testing approach`,
 
-	ReviewPlan: `Review the implementation plan at .ultra-engineer/plan.md (iteration %d/5).
+	ReviewPlan: `/review the plan at .ultra-engineer/plan.md and fix all issues`,
 
-Check for:
-1. Missing edge cases
-2. Security issues
-3. Scope creep
-4. Correct dependencies
-5. Simpler alternatives
-6. Testability
-
-If issues found, fix them directly in .ultra-engineer/plan.md.
-Output "REVIEW_COMPLETE" when done.`,
-
-	ReviewCode: `Review the code changes (iteration %d/5).
-
-Read .ultra-engineer/plan.md for context.
-
-Check for:
-1. Bugs and edge cases
-2. Security vulnerabilities
-3. Code readability
-4. Performance issues
-5. Missing error handling
-
-Fix any issues directly in the code files.
-Output "REVIEW_COMPLETE" when done.`,
+	ReviewCode: `/review the code and fix all issues`,
 
 	Implement: `Implement the plan from .ultra-engineer/plan.md
 
@@ -116,8 +93,6 @@ func FormatPlanForComment(plan string, reviewCount int) string {
 	sb.WriteString(fmt.Sprintf("*Reviewed %d times*\n\n", reviewCount))
 	sb.WriteString(plan)
 	sb.WriteString("\n\n---\n")
-	sb.WriteString("Reply with:\n")
-	sb.WriteString("- **approved** or **lgtm** to proceed with implementation\n")
-	sb.WriteString("- Your feedback to request changes\n")
+	sb.WriteString("Reply `/approve` to proceed with implementation, or provide feedback to request changes.\n")
 	return sb.String()
 }

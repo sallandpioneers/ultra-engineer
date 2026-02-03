@@ -85,16 +85,10 @@ func ParseUserAnswers(comment string) string {
 	return strings.TrimSpace(answer)
 }
 
-// IsApproval checks if a comment is an approval
+// IsApproval checks if a comment is an approval (only /approve)
 func IsApproval(comment string) bool {
-	lower := strings.ToLower(strings.TrimSpace(comment))
-	approvalPhrases := []string{"approved", "lgtm", "looks good", "ship it", "go ahead", "proceed"}
-	for _, phrase := range approvalPhrases {
-		if strings.Contains(lower, phrase) {
-			return true
-		}
-	}
-	return false
+	trimmed := strings.TrimSpace(comment)
+	return trimmed == "/approve"
 }
 
 // IsAbort checks if a comment is an abort command

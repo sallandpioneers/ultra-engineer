@@ -20,3 +20,6 @@ coverage.out
 
 # Sandboxes
 ultra-engineer-sandboxes/
+
+# Ultra Engineer working files
+.ultra-engineer/

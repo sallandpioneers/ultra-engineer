@@ -214,7 +214,6 @@ func (o *Orchestrator) handlePlanning(ctx context.Context, repo string, issue *p
 		return fmt.Errorf("failed to read plan: %w", err)
 	}
 
-	st.Plan = plan
 	st.SetPhase(state.PhaseApproval)
 
 	if err := o.planPhase.PostPlan(ctx, repo, issue.Number, plan, st); err != nil {
@@ -272,7 +271,6 @@ func (o *Orchestrator) handleApproval(ctx context.Context, repo string, issue *p
 	}
 
 	plan, _ := o.planPhase.GetPlan(sb.RepoDir)
-	st.Plan = plan
 	st.PlanVersion++
 
 	if err := o.planPhase.PostPlan(ctx, repo, issue.Number, plan, st); err != nil {
@@ -323,7 +321,7 @@ func (o *Orchestrator) handleReview(ctx context.Context, repo string, issue *pro
 			return false, err
 		}
 
-		pr, err := o.prPhase.CreatePR(ctx, repo, issue, st.Plan, sb, baseBranch)
+		pr, err := o.prPhase.CreatePR(ctx, repo, issue, sb, baseBranch)
 		if err != nil {
 			return false, err
 		}

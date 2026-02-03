@@ -31,18 +31,17 @@ func (p Phase) Label() string {
 
 // State represents the hidden state stored in issue comments
 type State struct {
-	SessionID       string          `json:"session_id,omitempty"`
-	CurrentPhase    Phase           `json:"current_phase"`
+	SessionID       string           `json:"session_id,omitempty"`
+	CurrentPhase    Phase            `json:"current_phase"`
 	QAHistory       []claude.QAEntry `json:"qa_history,omitempty"`
-	QARound         int             `json:"qa_round,omitempty"`
-	Plan            string          `json:"plan,omitempty"`
-	PlanVersion     int             `json:"plan_version,omitempty"`
-	ReviewIteration int             `json:"review_iteration,omitempty"`
-	PRNumber        int             `json:"pr_number,omitempty"`
-	BranchName      string          `json:"branch_name,omitempty"`
-	LastUpdated     time.Time       `json:"last_updated"`
-	LastCommentID   int64           `json:"last_comment_id,omitempty"`
-	Error           string          `json:"error,omitempty"`
+	QARound         int              `json:"qa_round,omitempty"`
+	PlanVersion     int              `json:"plan_version,omitempty"`
+	ReviewIteration int              `json:"review_iteration,omitempty"`
+	PRNumber        int              `json:"pr_number,omitempty"`
+	BranchName      string           `json:"branch_name,omitempty"`
+	LastUpdated     time.Time        `json:"last_updated"`
+	LastCommentID   int64            `json:"last_comment_id,omitempty"`
+	Error           string           `json:"error,omitempty"`
 }
 
 const (
