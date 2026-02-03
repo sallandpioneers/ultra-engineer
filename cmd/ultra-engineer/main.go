@@ -2,7 +2,10 @@ package main
 
 import (
 	"fmt"
+	"io"
+	"log"
 	"os"
+	"path/filepath"
 
 	"github.com/spf13/cobra"
 )
@@ -10,6 +13,7 @@ import (
 var (
 	configPath string
 	verbose    bool
+	logFile    string
 )
 
 func main() {
@@ -28,6 +32,7 @@ It handles the full workflow:
 
 	rootCmd.PersistentFlags().StringVarP(&configPath, "config", "c", "config.yaml", "Path to config file")
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "Enable verbose logging")
+	rootCmd.PersistentFlags().StringVar(&logFile, "log-file", "", "Path to log file (logs to both stdout and file)")
 
 	rootCmd.AddCommand(daemonCmd())
 	rootCmd.AddCommand(runCmd())
@@ -49,4 +54,48 @@ func versionCmd() *cobra.Command {
 			fmt.Println("ultra-engineer v0.1.0")
 		},
 	}
+}
+
+// setupLogger creates a logger that writes to stdout and optionally to a file.
+// It returns the logger, a cleanup function to close the file handle, and any error.
+// If logFilePath is empty, the logger writes to stdout only.
+// If the file cannot be opened, it logs a warning to stderr and returns a stdout-only logger.
+func setupLogger(logFilePath string, verbose bool) (*log.Logger, func(), error) {
+	flags := log.LstdFlags
+	if verbose {
+		flags |= log.Lshortfile
+	}
+
+	// If no log file specified, return stdout-only logger
+	if logFilePath == "" {
+		logger := log.New(os.Stdout, "[ultra-engineer] ", flags)
+		return logger, func() {}, nil
+	}
+
+	// Create parent directories if they don't exist
+	dir := filepath.Dir(logFilePath)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to create log directory %s: %v, logging to stdout only\n", dir, err)
+		logger := log.New(os.Stdout, "[ultra-engineer] ", flags)
+		return logger, func() {}, nil
+	}
+
+	// Open log file
+	file, err := os.OpenFile(logFilePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to open log file %s: %v, logging to stdout only\n", logFilePath, err)
+		logger := log.New(os.Stdout, "[ultra-engineer] ", flags)
+		return logger, func() {}, nil
+	}
+
+	// Create multi-writer for both stdout and file
+	multiWriter := io.MultiWriter(os.Stdout, file)
+	logger := log.New(multiWriter, "[ultra-engineer] ", flags)
+
+	cleanup := func() {
+		file.Sync()
+		file.Close()
+	}
+
+	return logger, cleanup, nil
 }

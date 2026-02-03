@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
 	"os"
 	"os/signal"
 	"syscall"
@@ -56,11 +55,18 @@ func runSingle(repo string, issueNum int) error {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
 
-	// Create logger
-	logger := log.New(os.Stdout, "[ultra-engineer] ", log.LstdFlags)
-	if verbose {
-		logger.SetFlags(log.LstdFlags | log.Lshortfile)
+	// Determine log file path (CLI flag takes precedence over config)
+	logFilePath := logFile
+	if logFilePath == "" {
+		logFilePath = cfg.LogFile
 	}
+
+	// Create logger
+	logger, cleanup, err := setupLogger(logFilePath, verbose)
+	if err != nil {
+		return fmt.Errorf("failed to setup logger: %w", err)
+	}
+	defer cleanup()
 
 	// Create provider
 	provider, err := createProvider(cfg)
@@ -79,9 +85,13 @@ func runSingle(repo string, issueNum int) error {
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
 	go func() {
-		<-sigCh
-		logger.Println("Received shutdown signal")
-		cancel()
+		select {
+		case <-sigCh:
+			logger.Println("Received shutdown signal")
+			cancel()
+		case <-ctx.Done():
+			// Context cancelled, exit goroutine
+		}
 	}()
 
 	// Run single issue
