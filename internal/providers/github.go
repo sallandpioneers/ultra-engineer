@@ -4,19 +4,29 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 	"strconv"
+	"strings"
 	"time"
 )
 
 // GitHubProvider implements Provider using the gh CLI
-type GitHubProvider struct {
-	token string
-}
+// Note: Authentication is handled by the gh CLI (via GH_TOKEN env var or gh auth login)
+type GitHubProvider struct{}
 
 // NewGitHubProvider creates a new GitHub provider
+// The token parameter is kept for interface consistency but authentication
+// is handled by the gh CLI itself
 func NewGitHubProvider(token string) *GitHubProvider {
-	return &GitHubProvider{token: token}
+	// If a token is provided, set it as an environment variable for gh CLI
+	// This allows explicit token configuration while still using gh CLI
+	// Note: This is not thread-safe, but provider creation should happen
+	// once during startup, not concurrently
+	if token != "" {
+		os.Setenv("GH_TOKEN", token)
+	}
+	return &GitHubProvider{}
 }
 
 func (g *GitHubProvider) Name() string {
@@ -153,9 +163,13 @@ func (g *GitHubProvider) GetComments(ctx context.Context, repo string, number in
 
 	result := make([]*Comment, len(comments))
 	for i, c := range comments {
-		// GitHub uses node IDs, convert to int64 if possible or use hash
+		// GitHub's gh CLI returns GraphQL node IDs (strings like "IC_kwDOOTmGh85y...")
+		// We need a stable numeric ID for comparison. Use a hash of the node ID.
 		var id int64
-		fmt.Sscanf(c.ID, "%d", &id)
+		if _, err := fmt.Sscanf(c.ID, "%d", &id); err != nil || id == 0 {
+			// Generate a stable hash from the node ID
+			id = hashNodeID(c.ID)
+		}
 		result[i] = &Comment{
 			ID:        id,
 			Body:      c.Body,
@@ -253,8 +267,13 @@ func (g *GitHubProvider) GetPRComments(ctx context.Context, repo string, number 
 
 	result := make([]*Comment, len(comments))
 	for i, c := range comments {
+		// GitHub's gh CLI returns GraphQL node IDs (strings like "IC_kwDOOTmGh85y...")
+		// We need a stable numeric ID for comparison. Use a hash of the node ID.
 		var id int64
-		fmt.Sscanf(c.ID, "%d", &id)
+		if _, err := fmt.Sscanf(c.ID, "%d", &id); err != nil || id == 0 {
+			// Generate a stable hash from the node ID
+			id = hashNodeID(c.ID)
+		}
 		result[i] = &Comment{
 			ID:        id,
 			Body:      c.Body,
@@ -281,7 +300,11 @@ func (g *GitHubProvider) IsMergeable(ctx context.Context, repo string, number in
 
 func (g *GitHubProvider) Clone(ctx context.Context, repo string, dest string) error {
 	cmd := g.ghCmd(ctx, "repo", "clone", repo, dest)
-	return cmd.Run()
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to clone repository: %w: %s", err, string(output))
+	}
+	return nil
 }
 
 func (g *GitHubProvider) GetDefaultBranch(ctx context.Context, repo string) (string, error) {
@@ -290,10 +313,21 @@ func (g *GitHubProvider) GetDefaultBranch(ctx context.Context, repo string) (str
 		return "", err
 	}
 
-	branch := string(out)
-	branch = branch[:len(branch)-1] // trim newline
+	branch := strings.TrimSpace(string(out))
 	if branch == "" {
 		return "main", nil
 	}
 	return branch, nil
+}
+
+// hashNodeID generates a stable int64 hash from a GitHub node ID string
+func hashNodeID(nodeID string) int64 {
+	// Use FNV-1a hash algorithm for stable hashing
+	var hash uint64 = 14695981039346656037 // FNV offset basis
+	for i := 0; i < len(nodeID); i++ {
+		hash ^= uint64(nodeID[i])
+		hash *= 1099511628211 // FNV prime
+	}
+	// Convert to int64, keeping it positive for consistency
+	return int64(hash & 0x7FFFFFFFFFFFFFFF)
 }

@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 )
 
 // Sandbox represents an isolated working directory for an issue
@@ -41,10 +42,19 @@ func (s *Sandbox) Clone(ctx context.Context, cloneURL string) error {
 	return nil
 }
 
-// CreateBranch creates and checks out a new branch
+// CreateBranch creates and checks out a new branch, or checks out if it already exists
 func (s *Sandbox) CreateBranch(ctx context.Context, branchName string) error {
 	s.BranchName = branchName
 
+	// First try to checkout the branch if it already exists
+	checkoutCmd := exec.CommandContext(ctx, "git", "checkout", branchName)
+	checkoutCmd.Dir = s.RepoDir
+	if err := checkoutCmd.Run(); err == nil {
+		// Branch exists and checkout succeeded
+		return nil
+	}
+
+	// Branch doesn't exist, create it
 	cmd := exec.CommandContext(ctx, "git", "checkout", "-b", branchName)
 	cmd.Dir = s.RepoDir
 	if output, err := cmd.CombinedOutput(); err != nil {
@@ -55,14 +65,7 @@ func (s *Sandbox) CreateBranch(ctx context.Context, branchName string) error {
 
 // Commit stages all changes and creates a commit
 func (s *Sandbox) Commit(ctx context.Context, message string) error {
-	// Stage all changes
-	addCmd := exec.CommandContext(ctx, "git", "add", "-A")
-	addCmd.Dir = s.RepoDir
-	if output, err := addCmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("failed to stage changes: %w: %s", err, string(output))
-	}
-
-	// Check if there are changes to commit
+	// Check if there are changes before staging
 	statusCmd := exec.CommandContext(ctx, "git", "status", "--porcelain")
 	statusCmd.Dir = s.RepoDir
 	statusOutput, err := statusCmd.Output()
@@ -73,6 +76,13 @@ func (s *Sandbox) Commit(ctx context.Context, message string) error {
 	if len(statusOutput) == 0 {
 		// No changes to commit
 		return nil
+	}
+
+	// Stage all changes
+	addCmd := exec.CommandContext(ctx, "git", "add", "-A")
+	addCmd.Dir = s.RepoDir
+	if output, err := addCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to stage changes: %w: %s", err, string(output))
 	}
 
 	// Commit
@@ -103,7 +113,7 @@ func (s *Sandbox) GetCurrentBranch(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to get current branch: %w", err)
 	}
-	return string(output[:len(output)-1]), nil // trim newline
+	return strings.TrimSpace(string(output)), nil
 }
 
 // HasChanges checks if there are uncommitted changes

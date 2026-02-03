@@ -31,15 +31,36 @@ type PRResult struct {
 
 // CreatePR creates a pull request from the implementation
 func (p *PRPhase) CreatePR(ctx context.Context, repo string, issue *providers.Issue, plan string, sb *sandbox.Sandbox, baseBranch string) (*PRResult, error) {
+	// Check context before each operation
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+	}
+
 	// Commit any remaining changes
 	commitMsg := fmt.Sprintf("Implement: %s\n\nCloses #%d\n\nImplemented by Ultra Engineer", issue.Title, issue.Number)
 	if err := sb.Commit(ctx, commitMsg); err != nil {
 		return nil, fmt.Errorf("failed to commit: %w", err)
 	}
 
+	// Check context before push
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+	}
+
 	// Push the branch
 	if err := sb.Push(ctx); err != nil {
 		return nil, fmt.Errorf("failed to push: %w", err)
+	}
+
+	// Check context before creating PR
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
 	}
 
 	// Create PR
@@ -119,9 +140,24 @@ func (p *PRPhase) PostComment(ctx context.Context, repo string, prNumber int, bo
 
 // PushFix commits and pushes a fix
 func (p *PRPhase) PushFix(ctx context.Context, sb *sandbox.Sandbox, message string) error {
+	// Check context before commit
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
+
 	if err := sb.Commit(ctx, message); err != nil {
 		return fmt.Errorf("failed to commit fix: %w", err)
 	}
+
+	// Check context before push
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
+
 	return sb.Push(ctx)
 }
 

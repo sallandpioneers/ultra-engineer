@@ -213,11 +213,13 @@ func (o *Orchestrator) handleQuestionsPhase(ctx context.Context, repo string, is
 
 	// Record Q&A
 	if st.QARound > 0 {
-		// Get the questions from the last round
+		// Get the questions from the last round - find the bot's comment that came before the user's answer
 		var lastQuestions string
 		for i := len(comments) - 1; i >= 0; i-- {
-			if state.ContainsState(comments[i].Body) {
-				lastQuestions = state.RemoveState(comments[i].Body)
+			c := comments[i]
+			// Find the most recent bot comment (contains state) that came before the user's answer
+			if state.ContainsState(c.Body) && c.ID < latestAnswer.ID {
+				lastQuestions = state.RemoveState(c.Body)
 				break
 			}
 		}
@@ -426,6 +428,14 @@ func (o *Orchestrator) handleReviewPhase(ctx context.Context, repo string, issue
 			return false, fmt.Errorf("failed to address feedback: %w", err)
 		}
 
+		// Update LastCommentID to avoid processing the same feedback again
+		comments, err := o.provider.GetPRComments(ctx, repo, st.PRNumber)
+		if err != nil {
+			o.logger.Printf("Warning: failed to get PR comments for LastCommentID update: %v", err)
+		} else if len(comments) > 0 {
+			st.LastCommentID = comments[len(comments)-1].ID
+		}
+
 		// Push the fix
 		if err := o.prPhase.PushFix(ctx, sb, "Address review feedback"); err != nil {
 			return false, fmt.Errorf("failed to push fix: %w", err)
@@ -481,8 +491,14 @@ func (o *Orchestrator) handleError(ctx context.Context, repo string, issueNum in
 
 	// Post error comment
 	comment := fmt.Sprintf("**Error during processing:**\n\n```\n%s\n```\n\nPlease check the logs for more details.", err.Error())
-	commentWithState, _ := st.AppendToBody(comment)
-	o.provider.CreateComment(ctx, repo, issueNum, commentWithState)
+	commentWithState, stateErr := st.AppendToBody(comment)
+	if stateErr != nil {
+		o.logger.Printf("Warning: failed to append state to error comment: %v", stateErr)
+		commentWithState = comment
+	}
+	if commentErr := o.provider.CreateComment(ctx, repo, issueNum, commentWithState); commentErr != nil {
+		o.logger.Printf("Warning: failed to post error comment: %v", commentErr)
+	}
 
 	o.updateLabels(ctx, repo, issueNum, state.PhaseFailed)
 }
@@ -511,13 +527,17 @@ func (o *Orchestrator) abort(ctx context.Context, repo string, issueNum int, st 
 func (o *Orchestrator) updateLabels(ctx context.Context, repo string, issueNum int, newPhase state.Phase) {
 	labels := state.NewLabels()
 
-	// Remove old phase labels
+	// Remove old phase labels (ignore errors - labels may not exist)
 	for _, label := range labels.GetPhaseLabelsToRemove(newPhase) {
-		o.provider.RemoveLabel(ctx, repo, issueNum, label)
+		if err := o.provider.RemoveLabel(ctx, repo, issueNum, label); err != nil {
+			o.logger.Printf("Warning: failed to remove label %s: %v", label, err)
+		}
 	}
 
 	// Add new phase label
-	o.provider.AddLabel(ctx, repo, issueNum, newPhase.Label())
+	if err := o.provider.AddLabel(ctx, repo, issueNum, newPhase.Label()); err != nil {
+		o.logger.Printf("Warning: failed to add label %s: %v", newPhase.Label(), err)
+	}
 }
 
 // WaitForInteraction waits for the specified duration before checking again

@@ -112,8 +112,19 @@ func (d *Daemon) continueCurrentIssue(ctx context.Context) error {
 
 	err = d.processIssue(ctx, issue)
 
+	// Re-fetch the issue to get updated labels after processing
+	updatedIssue, fetchErr := d.provider.GetIssue(ctx, d.currentRepo, d.currentIssue)
+	if fetchErr != nil {
+		// If we can't fetch, check the original issue labels as fallback
+		phase := state.ParsePhaseFromLabels(issue.Labels)
+		if phase == state.PhaseCompleted || phase == state.PhaseFailed {
+			d.currentIssue = 0
+		}
+		return err
+	}
+
 	// Check if we should stop processing this issue
-	phase := state.ParsePhaseFromLabels(issue.Labels)
+	phase := state.ParsePhaseFromLabels(updatedIssue.Labels)
 	if phase == state.PhaseCompleted || phase == state.PhaseFailed {
 		d.currentIssue = 0
 	}

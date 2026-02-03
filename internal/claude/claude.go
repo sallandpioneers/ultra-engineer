@@ -43,7 +43,7 @@ type RunOptions struct {
 
 // Run executes Claude Code with the given prompt
 func (c *Client) Run(ctx context.Context, opts RunOptions) (string, error) {
-	_, result, err := c.RunInteractive(ctx, opts)
+	result, _, err := c.RunInteractive(ctx, opts)
 	return result, err
 }
 

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os/exec"
 	"strings"
 	"time"
@@ -150,7 +151,7 @@ func (g *GiteaProvider) GetIssue(ctx context.Context, repo string, number int) (
 }
 
 func (g *GiteaProvider) ListIssuesWithLabel(ctx context.Context, repo string, label string) ([]*Issue, error) {
-	path := fmt.Sprintf("/repos/%s/issues?state=open&labels=%s", repo, label)
+	path := fmt.Sprintf("/repos/%s/issues?state=open&labels=%s", repo, url.QueryEscape(label))
 	data, err := g.doRequest(ctx, "GET", path, nil)
 	if err != nil {
 		return nil, err
@@ -400,7 +401,9 @@ func (g *GiteaProvider) Clone(ctx context.Context, repo string, dest string) err
 	cmd := exec.CommandContext(ctx, "git", "clone", cloneURL, dest)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("git clone failed: %w: %s", err, string(output))
+		// Sanitize output to remove any token that might be in error messages
+		sanitizedOutput := strings.ReplaceAll(string(output), g.token, "[REDACTED]")
+		return fmt.Errorf("git clone failed: %w: %s", err, sanitizedOutput)
 	}
 	return nil
 }
