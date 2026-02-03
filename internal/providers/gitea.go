@@ -220,6 +220,12 @@ func (g *GiteaProvider) UpdateIssueBody(ctx context.Context, repo string, number
 	return err
 }
 
+func (g *GiteaProvider) ReactToComment(ctx context.Context, repo string, commentID int64, reaction string) error {
+	path := fmt.Sprintf("/repos/%s/issues/comments/%d/reactions", repo, commentID)
+	_, err := g.doRequest(ctx, "POST", path, map[string]string{"content": reaction})
+	return err
+}
+
 func (g *GiteaProvider) AddLabel(ctx context.Context, repo string, number int, label string) error {
 	// First get the label ID
 	labelID, err := g.getLabelID(ctx, repo, label)

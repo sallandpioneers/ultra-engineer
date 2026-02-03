@@ -188,6 +188,9 @@ func (o *Orchestrator) handleQuestions(ctx context.Context, repo string, issue *
 		return true, nil // Wait for user
 	}
 
+	// React to acknowledge we've read the comment
+	o.provider.ReactToComment(ctx, repo, answer.ID, "+1")
+
 	if workflow.IsAbort(answer.Body) {
 		return false, fmt.Errorf("user aborted")
 	}
@@ -241,6 +244,9 @@ func (o *Orchestrator) handleApproval(ctx context.Context, repo string, issue *p
 	if response == nil {
 		return true, nil // Wait for user
 	}
+
+	// React to acknowledge we've read the comment
+	o.provider.ReactToComment(ctx, repo, response.ID, "+1")
 
 	st.LastCommentID = response.ID
 

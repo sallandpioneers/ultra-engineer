@@ -55,6 +55,7 @@ type Provider interface {
 	GetComments(ctx context.Context, repo string, number int) ([]*Comment, error)
 	CreateComment(ctx context.Context, repo string, number int, body string) error
 	UpdateIssueBody(ctx context.Context, repo string, number int, body string) error
+	ReactToComment(ctx context.Context, repo string, commentID int64, reaction string) error
 
 	// Label operations
 	AddLabel(ctx context.Context, repo string, number int, label string) error

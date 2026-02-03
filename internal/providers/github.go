@@ -191,6 +191,13 @@ func (g *GitHubProvider) UpdateIssueBody(ctx context.Context, repo string, numbe
 	return err
 }
 
+func (g *GitHubProvider) ReactToComment(ctx context.Context, repo string, commentID int64, reaction string) error {
+	// Use gh api to add a reaction to a comment
+	endpoint := fmt.Sprintf("/repos/%s/issues/comments/%d/reactions", repo, commentID)
+	_, err := g.runGH(ctx, "api", endpoint, "-X", "POST", "-f", "content="+reaction)
+	return err
+}
+
 func (g *GitHubProvider) AddLabel(ctx context.Context, repo string, number int, label string) error {
 	_, err := g.runGH(ctx, "issue", "edit", strconv.Itoa(number), "--repo", repo, "--add-label", label)
 	return err
