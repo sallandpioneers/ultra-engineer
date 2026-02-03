@@ -47,6 +47,7 @@ type State struct {
 const (
 	stateMarkerStart = "<!-- ultra-engineer-state"
 	stateMarkerEnd   = "-->"
+	BotMarker        = "<!-- ultra-engineer -->"
 )
 
 var stateRegex = regexp.MustCompile(`<!-- ultra-engineer-state\s*([\s\S]*?)\s*-->`)
@@ -141,6 +142,16 @@ func (s *State) UpdateBody(body string) (string, error) {
 // ContainsState checks if a body contains state
 func ContainsState(body string) bool {
 	return stateRegex.MatchString(body)
+}
+
+// IsBotComment checks if a comment was made by the bot (has bot marker or state)
+func IsBotComment(body string) bool {
+	return strings.Contains(body, BotMarker) || stateRegex.MatchString(body)
+}
+
+// AddBotMarker adds the bot marker to a comment body
+func AddBotMarker(body string) string {
+	return body + "\n\n" + BotMarker
 }
 
 // RemoveState removes state from a body

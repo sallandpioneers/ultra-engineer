@@ -175,11 +175,11 @@ func (o *Orchestrator) handleQuestions(ctx context.Context, repo string, issue *
 		return false, err
 	}
 
-	// Find latest user answer (skip bot comments and comments with state)
+	// Find latest user answer (skip bot comments)
 	var answer *providers.Comment
 	for i := len(comments) - 1; i >= 0; i-- {
 		c := comments[i]
-		if c.ID > st.LastCommentID && !state.ContainsState(c.Body) && !o.isBotComment(c) {
+		if c.ID > st.LastCommentID && !state.IsBotComment(c.Body) {
 			answer = c
 			break
 		}
@@ -234,11 +234,11 @@ func (o *Orchestrator) handleApproval(ctx context.Context, repo string, issue *p
 		return false, err
 	}
 
-	// Find latest user response (skip bot comments and comments with state)
+	// Find latest user response (skip bot comments)
 	var response *providers.Comment
 	for i := len(comments) - 1; i >= 0; i-- {
 		c := comments[i]
-		if c.ID > st.LastCommentID && !state.ContainsState(c.Body) && !o.isBotComment(c) {
+		if c.ID > st.LastCommentID && !state.IsBotComment(c.Body) {
 			response = c
 			break
 		}
@@ -338,7 +338,7 @@ func (o *Orchestrator) handleReview(ctx context.Context, repo string, issue *pro
 		st.PRNumber = pr.PR.Number
 		o.logger.Printf("Created PR #%d", st.PRNumber)
 
-		o.provider.CreateComment(ctx, repo, issue.Number, fmt.Sprintf("Created PR #%d: %s", st.PRNumber, pr.PR.HTMLURL))
+		o.provider.CreateComment(ctx, repo, issue.Number, state.AddBotMarker(fmt.Sprintf("Created PR #%d: %s", st.PRNumber, pr.PR.HTMLURL)))
 	}
 
 	// Check if mergeable
@@ -391,11 +391,3 @@ func (o *Orchestrator) WaitForInteraction(ctx context.Context, duration time.Dur
 	}
 }
 
-// isBotComment checks if a comment was made by the bot itself
-func (o *Orchestrator) isBotComment(c *providers.Comment) bool {
-	botUsername := o.config.Defaults.BotUsername
-	if botUsername == "" {
-		return false // No bot username configured, can't filter
-	}
-	return c.Author == botUsername
-}
