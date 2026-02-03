@@ -25,17 +25,27 @@ If you have clarifying questions, write them to .ultra-engineer/questions.md in 
 
    A. [Option] (Recommended)
       Effort: [Low/Medium/High]
+      Risk: [Low/Medium/High - breaking changes, compatibility issues]
       Pros: [2-3 benefits]
       Cons: [1-2 drawbacks]
 
    B. [Option]
       Effort: [Low/Medium/High]
+      Risk: [Low/Medium/High]
       Pros: [2-3 benefits]
       Cons: [1-2 drawbacks]
 
    C. Other (please specify)
 
 Mark your recommended option with "(Recommended)". Add blank lines between options.
+If an option depends on another question's answer, note it (e.g., "Requires 1A").
+
+End with a summary table:
+| Question | Recommended | Why |
+|----------|-------------|-----|
+| 1 | A | [brief reason] |
+
+And a note: "If you're unsure, replying with just the recommended options (e.g., '1A, 2A, 3B') is a safe default."
 
 If no questions needed, write "NO_QUESTIONS_NEEDED" to .ultra-engineer/questions.md
 
