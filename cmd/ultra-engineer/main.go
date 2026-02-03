@@ -6,8 +6,16 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"runtime"
 
 	"github.com/spf13/cobra"
+)
+
+var (
+	// Version information (set via ldflags at build time)
+	version   = "dev"
+	commit    = "unknown"
+	buildDate = "unknown"
 )
 
 var (
@@ -51,7 +59,10 @@ func versionCmd() *cobra.Command {
 		Use:   "version",
 		Short: "Print version information",
 		Run: func(cmd *cobra.Command, args []string) {
-			fmt.Println("ultra-engineer v0.1.0")
+			fmt.Printf("ultra-engineer %s\n", version)
+			fmt.Printf("  Commit:     %s\n", commit)
+			fmt.Printf("  Built:      %s\n", buildDate)
+			fmt.Printf("  Go version: %s\n", runtime.Version())
 		},
 	}
 }
