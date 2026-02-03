@@ -42,23 +42,20 @@ func (s *Sandbox) Clone(ctx context.Context, cloneURL string) error {
 	return nil
 }
 
-// CreateBranch creates and checks out a new branch, or checks out if it already exists
+// CreateBranch creates and checks out a new branch, or checks out existing one
 func (s *Sandbox) CreateBranch(ctx context.Context, branchName string) error {
 	s.BranchName = branchName
 
-	// First try to checkout the branch if it already exists
-	checkoutCmd := exec.CommandContext(ctx, "git", "checkout", branchName)
-	checkoutCmd.Dir = s.RepoDir
-	if err := checkoutCmd.Run(); err == nil {
-		// Branch exists and checkout succeeded
-		return nil
-	}
-
-	// Branch doesn't exist, create it
+	// Try to create new branch
 	cmd := exec.CommandContext(ctx, "git", "checkout", "-b", branchName)
 	cmd.Dir = s.RepoDir
-	if output, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("failed to create branch: %w: %s", err, string(output))
+	if _, err := cmd.CombinedOutput(); err != nil {
+		// Branch might already exist, try checking it out
+		cmd2 := exec.CommandContext(ctx, "git", "checkout", branchName)
+		cmd2.Dir = s.RepoDir
+		if output, err := cmd2.CombinedOutput(); err != nil {
+			return fmt.Errorf("failed to checkout branch: %w: %s", err, string(output))
+		}
 	}
 	return nil
 }

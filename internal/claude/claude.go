@@ -26,10 +26,10 @@ func NewClient(command string, timeout time.Duration) *Client {
 
 // JSONResponse represents the JSON output from Claude Code
 type JSONResponse struct {
-	Type      string `json:"type"`
-	SessionID string `json:"session_id"`
-	Result    string `json:"result"`
-	Error     string `json:"error,omitempty"`
+	Type      string  `json:"type"`
+	SessionID string  `json:"session_id"`
+	Result    string  `json:"result"`
+	Error     string  `json:"error,omitempty"`
 	CostUSD   float64 `json:"cost_usd"`
 }
 
@@ -53,21 +53,17 @@ func (c *Client) RunInteractive(ctx context.Context, opts RunOptions) (string, s
 	ctx, cancel := context.WithTimeout(ctx, c.timeout)
 	defer cancel()
 
+	// Build args: claude -p "prompt" --dangerously-skip-permissions --output-format json
+	// Prompt immediately follows -p
 	args := []string{
-		"-p", // print mode (non-interactive)
+		"-p", opts.Prompt,
+		"--dangerously-skip-permissions",
 		"--output-format", "json",
-	}
-
-	if opts.SessionID != "" {
-		args = append(args, "--resume", opts.SessionID)
 	}
 
 	for _, tool := range opts.AllowedTools {
 		args = append(args, "--allowedTools", tool)
 	}
-
-	// Prompt must be the last positional argument
-	args = append(args, opts.Prompt)
 
 	cmd := exec.CommandContext(ctx, c.command, args...)
 	cmd.Dir = opts.WorkDir

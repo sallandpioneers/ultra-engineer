@@ -22,11 +22,10 @@ type Orchestrator struct {
 	sandbox  *sandbox.Manager
 	logger   *log.Logger
 
-	// Workflow phases
-	qaPhase     *workflow.QAPhase
-	planPhase   *workflow.PlanningPhase
-	implPhase   *workflow.ImplementationPhase
-	prPhase     *workflow.PRPhase
+	qaPhase   *workflow.QAPhase
+	planPhase *workflow.PlanningPhase
+	implPhase *workflow.ImplementationPhase
+	prPhase   *workflow.PRPhase
 }
 
 // New creates a new orchestrator
@@ -61,486 +60,321 @@ func (o *Orchestrator) ProcessIssue(ctx context.Context, repo string, issue *pro
 	// Load or create state
 	st, err := o.loadState(ctx, repo, issue.Number)
 	if err != nil {
-		o.logger.Printf("No existing state found, starting fresh: %v", err)
 		st = state.NewState()
+		phase := state.ParsePhaseFromLabels(issue.Labels)
+		if phase != state.PhaseNew {
+			st.CurrentPhase = phase
+		}
 	}
 
 	// Clone repo if needed
 	if !sb.Exists() {
 		o.logger.Printf("Cloning repository...")
 		if err := o.provider.Clone(ctx, repo, sb.RepoDir); err != nil {
-			return fmt.Errorf("failed to clone repository: %w", err)
+			return fmt.Errorf("failed to clone: %w", err)
 		}
 	}
 
-	// Run the state machine
 	return o.runStateMachine(ctx, repo, issue, st, sb)
 }
 
-// loadState loads state from issue comments
 func (o *Orchestrator) loadState(ctx context.Context, repo string, issueNum int) (*state.State, error) {
 	comments, err := o.provider.GetComments(ctx, repo, issueNum)
 	if err != nil {
 		return nil, err
 	}
-
-	var commentBodies []string
+	var bodies []string
 	for _, c := range comments {
-		commentBodies = append(commentBodies, c.Body)
+		bodies = append(bodies, c.Body)
 	}
-
-	return state.ParseFromComments(commentBodies)
+	return state.ParseFromComments(bodies)
 }
 
-// runStateMachine executes the workflow state machine
 func (o *Orchestrator) runStateMachine(ctx context.Context, repo string, issue *providers.Issue, st *state.State, sb *sandbox.Sandbox) error {
 	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
-
-		o.logger.Printf("Current phase: %s", st.CurrentPhase)
-
-		var err error
-		var done bool
+		o.logger.Printf("Phase: %s", st.CurrentPhase)
 
 		switch st.CurrentPhase {
 		case state.PhaseNew:
-			err = o.handleNewPhase(ctx, repo, issue, st, sb)
+			if err := o.handleNew(ctx, repo, issue, st, sb); err != nil {
+				return o.fail(ctx, repo, issue.Number, st, err)
+			}
+
 		case state.PhaseQuestions:
-			done, err = o.handleQuestionsPhase(ctx, repo, issue, st, sb)
+			done, err := o.handleQuestions(ctx, repo, issue, st, sb)
+			if err != nil {
+				return o.fail(ctx, repo, issue.Number, st, err)
+			}
+			if done {
+				return nil // Waiting for user
+			}
+
 		case state.PhasePlanning:
-			err = o.handlePlanningPhase(ctx, repo, issue, st, sb)
+			if err := o.handlePlanning(ctx, repo, issue, st, sb); err != nil {
+				return o.fail(ctx, repo, issue.Number, st, err)
+			}
+
 		case state.PhaseApproval:
-			done, err = o.handleApprovalPhase(ctx, repo, issue, st, sb)
+			done, err := o.handleApproval(ctx, repo, issue, st, sb)
+			if err != nil {
+				return o.fail(ctx, repo, issue.Number, st, err)
+			}
+			if done {
+				return nil // Waiting for user
+			}
+
 		case state.PhaseImplementing:
-			err = o.handleImplementingPhase(ctx, repo, issue, st, sb)
+			if err := o.handleImplementing(ctx, repo, issue, st, sb); err != nil {
+				return o.fail(ctx, repo, issue.Number, st, err)
+			}
+
 		case state.PhaseReview:
-			done, err = o.handleReviewPhase(ctx, repo, issue, st, sb)
+			done, err := o.handleReview(ctx, repo, issue, st, sb)
+			if err != nil {
+				return o.fail(ctx, repo, issue.Number, st, err)
+			}
+			if done {
+				return nil
+			}
+
 		case state.PhaseCompleted:
-			o.logger.Printf("Issue #%d completed successfully", issue.Number)
+			o.logger.Printf("Issue #%d completed", issue.Number)
 			return nil
+
 		case state.PhaseFailed:
-			o.logger.Printf("Issue #%d failed: %s", issue.Number, st.Error)
-			return fmt.Errorf("issue processing failed: %s", st.Error)
-		default:
-			return fmt.Errorf("unknown phase: %s", st.CurrentPhase)
-		}
-
-		if err != nil {
-			o.handleError(ctx, repo, issue.Number, st, err)
-			return err
-		}
-
-		// If phase requires waiting for user input, exit the loop
-		if done {
-			return nil
+			return fmt.Errorf("issue failed: %s", st.Error)
 		}
 	}
 }
 
-// handleNewPhase handles a new issue
-func (o *Orchestrator) handleNewPhase(ctx context.Context, repo string, issue *providers.Issue, st *state.State, sb *sandbox.Sandbox) error {
-	o.logger.Printf("Starting Q&A phase for issue #%d", issue.Number)
+func (o *Orchestrator) handleNew(ctx context.Context, repo string, issue *providers.Issue, st *state.State, sb *sandbox.Sandbox) error {
+	o.logger.Printf("Analyzing issue...")
 
-	// Generate initial questions
-	result, err := o.qaPhase.GenerateQuestions(ctx, issue, st, sb.RepoDir)
+	result, err := o.qaPhase.AnalyzeIssue(ctx, issue, sb.RepoDir)
 	if err != nil {
-		return fmt.Errorf("failed to generate questions: %w", err)
+		return err
 	}
-
-	st.SessionID = result.SessionID
 
 	if result.NoMoreQuestions {
-		// No questions needed, go straight to planning
 		st.SetPhase(state.PhasePlanning)
-		o.updateLabels(ctx, repo, issue.Number, state.PhasePlanning)
-		return nil
+		o.setLabel(ctx, repo, issue.Number, state.PhasePlanning)
+	} else {
+		st.QARound = 1
+		if err := o.qaPhase.PostQuestions(ctx, repo, issue.Number, result.Questions, 1, st); err != nil {
+			return err
+		}
+		st.SetPhase(state.PhaseQuestions)
+		o.setLabel(ctx, repo, issue.Number, state.PhaseQuestions)
 	}
-
-	// Post questions and wait for response
-	st.QARound = 1
-	if err := o.qaPhase.PostQuestions(ctx, repo, issue.Number, result.Questions, st.QARound, st); err != nil {
-		return fmt.Errorf("failed to post questions: %w", err)
-	}
-
-	st.SetPhase(state.PhaseQuestions)
-	o.updateLabels(ctx, repo, issue.Number, state.PhaseQuestions)
 	return nil
 }
 
-// handleQuestionsPhase handles the Q&A phase
-func (o *Orchestrator) handleQuestionsPhase(ctx context.Context, repo string, issue *providers.Issue, st *state.State, sb *sandbox.Sandbox) (bool, error) {
-	// Check for new comments (answers)
+func (o *Orchestrator) handleQuestions(ctx context.Context, repo string, issue *providers.Issue, st *state.State, sb *sandbox.Sandbox) (bool, error) {
 	comments, err := o.provider.GetComments(ctx, repo, issue.Number)
 	if err != nil {
-		return false, fmt.Errorf("failed to get comments: %w", err)
+		return false, err
 	}
 
 	// Find latest user answer
-	var latestAnswer *providers.Comment
+	var answer *providers.Comment
 	for i := len(comments) - 1; i >= 0; i-- {
-		c := comments[i]
-		if !state.ContainsState(c.Body) && c.ID > st.LastCommentID {
-			latestAnswer = c
+		if !state.ContainsState(comments[i].Body) && comments[i].ID > st.LastCommentID {
+			answer = comments[i]
 			break
 		}
 	}
 
-	if latestAnswer == nil {
-		// No new answers, wait
-		return true, nil
+	if answer == nil {
+		return true, nil // Wait for user
 	}
 
-	// Check for abort
-	if workflow.IsAbort(latestAnswer.Body) {
-		return false, o.abort(ctx, repo, issue.Number, st, "User requested abort")
+	if workflow.IsAbort(answer.Body) {
+		return false, fmt.Errorf("user aborted")
 	}
 
-	// Process the answer
-	answer := workflow.ParseUserAnswers(latestAnswer.Body)
-	st.LastCommentID = latestAnswer.ID
-
-	// Generate follow-up questions
-	result, err := o.qaPhase.GenerateFollowUpQuestions(ctx, issue, st, answer, sb.RepoDir)
-	if err != nil {
-		return false, fmt.Errorf("failed to generate follow-up questions: %w", err)
-	}
-
-	st.SessionID = result.SessionID
-
-	// Record Q&A
-	if st.QARound > 0 {
-		// Get the questions from the last round - find the bot's comment that came before the user's answer
-		var lastQuestions string
-		for i := len(comments) - 1; i >= 0; i-- {
-			c := comments[i]
-			// Find the most recent bot comment (contains state) that came before the user's answer
-			if state.ContainsState(c.Body) && c.ID < latestAnswer.ID {
-				lastQuestions = state.RemoveState(c.Body)
-				break
-			}
-		}
-		st.AddQA(lastQuestions, answer)
-	}
-
-	if result.NoMoreQuestions {
-		// Move to planning phase
-		st.SetPhase(state.PhasePlanning)
-		o.updateLabels(ctx, repo, issue.Number, state.PhasePlanning)
-		return false, nil
-	}
-
-	// Post follow-up questions
-	st.QARound++
-	if err := o.qaPhase.PostQuestions(ctx, repo, issue.Number, result.Questions, st.QARound, st); err != nil {
-		return false, fmt.Errorf("failed to post follow-up questions: %w", err)
-	}
-
-	return true, nil
+	st.LastCommentID = answer.ID
+	// Move to planning (simplified - skip follow-up questions for now)
+	st.SetPhase(state.PhasePlanning)
+	o.setLabel(ctx, repo, issue.Number, state.PhasePlanning)
+	return false, nil
 }
 
-// handlePlanningPhase handles the planning phase
-func (o *Orchestrator) handlePlanningPhase(ctx context.Context, repo string, issue *providers.Issue, st *state.State, sb *sandbox.Sandbox) error {
-	o.logger.Printf("Creating implementation plan...")
+func (o *Orchestrator) handlePlanning(ctx context.Context, repo string, issue *providers.Issue, st *state.State, sb *sandbox.Sandbox) error {
+	o.logger.Printf("Running %d plan reviews...", o.config.Claude.ReviewCycles)
 
-	// Create initial plan
-	planResult, err := o.planPhase.CreatePlan(ctx, issue, st, sb.RepoDir)
-	if err != nil {
-		return fmt.Errorf("failed to create plan: %w", err)
-	}
-
-	st.SessionID = planResult.SessionID
-	st.Plan = planResult.Plan
-
-	// Run review cycles
-	o.logger.Printf("Running %d plan review cycles...", o.config.Claude.ReviewCycles)
-	reviewedPlan, err := o.planPhase.RunFullReviewCycle(ctx, st.Plan, st, sb.RepoDir, func(iteration int) {
-		o.logger.Printf("Plan review iteration %d/%d", iteration, o.config.Claude.ReviewCycles)
+	err := o.planPhase.RunFullReviewCycle(ctx, sb.RepoDir, func(i int) {
+		o.logger.Printf("Plan review %d/%d", i, o.config.Claude.ReviewCycles)
 	})
 	if err != nil {
-		return fmt.Errorf("failed to review plan: %w", err)
+		return err
 	}
 
-	st.Plan = reviewedPlan.Plan
-	st.SessionID = reviewedPlan.SessionID
-	st.PlanVersion++
-
-	// Post plan for approval
-	if err := o.planPhase.PostPlan(ctx, repo, issue.Number, st.Plan, st); err != nil {
-		return fmt.Errorf("failed to post plan: %w", err)
+	plan, err := o.planPhase.GetPlan(sb.RepoDir)
+	if err != nil {
+		return fmt.Errorf("failed to read plan: %w", err)
 	}
 
+	st.Plan = plan
 	st.SetPhase(state.PhaseApproval)
-	o.updateLabels(ctx, repo, issue.Number, state.PhaseApproval)
+
+	if err := o.planPhase.PostPlan(ctx, repo, issue.Number, plan, st); err != nil {
+		return err
+	}
+
+	o.setLabel(ctx, repo, issue.Number, state.PhaseApproval)
 	return nil
 }
 
-// handleApprovalPhase handles waiting for plan approval
-func (o *Orchestrator) handleApprovalPhase(ctx context.Context, repo string, issue *providers.Issue, st *state.State, sb *sandbox.Sandbox) (bool, error) {
-	// Check for new comments
+func (o *Orchestrator) handleApproval(ctx context.Context, repo string, issue *providers.Issue, st *state.State, sb *sandbox.Sandbox) (bool, error) {
 	comments, err := o.provider.GetComments(ctx, repo, issue.Number)
 	if err != nil {
-		return false, fmt.Errorf("failed to get comments: %w", err)
+		return false, err
 	}
 
-	// Find latest user response
-	var latestResponse *providers.Comment
+	var response *providers.Comment
 	for i := len(comments) - 1; i >= 0; i-- {
-		c := comments[i]
-		if !state.ContainsState(c.Body) && c.ID > st.LastCommentID {
-			latestResponse = c
+		if !state.ContainsState(comments[i].Body) && comments[i].ID > st.LastCommentID {
+			response = comments[i]
 			break
 		}
 	}
 
-	if latestResponse == nil {
-		// No new response, wait
-		return true, nil
+	if response == nil {
+		return true, nil // Wait for user
 	}
 
-	st.LastCommentID = latestResponse.ID
+	st.LastCommentID = response.ID
 
-	// Check for abort
-	if workflow.IsAbort(latestResponse.Body) {
-		return false, o.abort(ctx, repo, issue.Number, st, "User requested abort")
+	if workflow.IsAbort(response.Body) {
+		return false, fmt.Errorf("user aborted")
 	}
 
-	// Check for approval
-	if workflow.IsApproval(latestResponse.Body) {
+	if workflow.IsApproval(response.Body) {
 		st.SetPhase(state.PhaseImplementing)
-		o.updateLabels(ctx, repo, issue.Number, state.PhaseImplementing)
+		o.setLabel(ctx, repo, issue.Number, state.PhaseImplementing)
 		return false, nil
 	}
 
 	// Handle feedback
-	feedback := workflow.ExtractFeedback(latestResponse.Body)
-	o.logger.Printf("Received feedback, integrating...")
+	feedback := workflow.ExtractFeedback(response.Body)
+	o.logger.Printf("Integrating feedback...")
 
-	result, needsReReview, err := o.planPhase.IntegrateFeedback(ctx, st.Plan, feedback, st, sb.RepoDir)
+	needsReReview, err := o.planPhase.IntegrateFeedback(ctx, feedback, sb.RepoDir)
 	if err != nil {
-		return false, fmt.Errorf("failed to integrate feedback: %w", err)
+		return false, err
 	}
-
-	st.Plan = result.Plan
-	st.SessionID = result.SessionID
 
 	if needsReReview {
-		o.logger.Printf("Significant changes, running re-review cycle...")
-		reviewedPlan, err := o.planPhase.RunFullReviewCycle(ctx, st.Plan, st, sb.RepoDir, func(iteration int) {
-			o.logger.Printf("Plan re-review iteration %d/%d", iteration, o.config.Claude.ReviewCycles)
+		o.logger.Printf("Re-reviewing plan...")
+		o.planPhase.RunFullReviewCycle(ctx, sb.RepoDir, func(i int) {
+			o.logger.Printf("Plan re-review %d/%d", i, o.config.Claude.ReviewCycles)
 		})
-		if err != nil {
-			return false, fmt.Errorf("failed to re-review plan: %w", err)
-		}
-		st.Plan = reviewedPlan.Plan
-		st.SessionID = reviewedPlan.SessionID
 	}
 
+	plan, _ := o.planPhase.GetPlan(sb.RepoDir)
+	st.Plan = plan
 	st.PlanVersion++
 
-	// Post updated plan
-	if err := o.planPhase.PostPlan(ctx, repo, issue.Number, st.Plan, st); err != nil {
-		return false, fmt.Errorf("failed to post updated plan: %w", err)
+	if err := o.planPhase.PostPlan(ctx, repo, issue.Number, plan, st); err != nil {
+		return false, err
 	}
 
-	return true, nil
+	return true, nil // Wait for approval again
 }
 
-// handleImplementingPhase handles the implementation phase
-func (o *Orchestrator) handleImplementingPhase(ctx context.Context, repo string, issue *providers.Issue, st *state.State, sb *sandbox.Sandbox) error {
-	o.logger.Printf("Implementing approved plan...")
-
-	// Create feature branch
+func (o *Orchestrator) handleImplementing(ctx context.Context, repo string, issue *providers.Issue, st *state.State, sb *sandbox.Sandbox) error {
 	branchName := fmt.Sprintf("ultra-engineer/issue-%d", issue.Number)
 	if err := sb.CreateBranch(ctx, branchName); err != nil {
-		return fmt.Errorf("failed to create branch: %w", err)
+		return err
 	}
 	st.BranchName = branchName
 
-	// Implement
-	implResult, err := o.implPhase.Implement(ctx, issue, st.Plan, st, sb)
-	if err != nil {
-		return fmt.Errorf("failed to implement: %w", err)
+	o.logger.Printf("Implementing...")
+	if err := o.implPhase.Implement(ctx, issue.Title, sb); err != nil {
+		return err
 	}
 
-	st.SessionID = implResult.SessionID
-
-	// Run code review cycles
-	o.logger.Printf("Running %d code review cycles...", o.config.Claude.ReviewCycles)
-	_, err = o.implPhase.RunFullCodeReviewCycle(ctx, st, sb, func(iteration int) {
-		o.logger.Printf("Code review iteration %d/%d", iteration, o.config.Claude.ReviewCycles)
+	o.logger.Printf("Running %d code reviews...", o.config.Claude.ReviewCycles)
+	err := o.implPhase.RunFullCodeReviewCycle(ctx, sb, func(i int) {
+		o.logger.Printf("Code review %d/%d", i, o.config.Claude.ReviewCycles)
 	})
 	if err != nil {
-		return fmt.Errorf("failed to review code: %w", err)
+		return err
 	}
 
-	// Move to PR phase
 	st.SetPhase(state.PhaseReview)
-	o.updateLabels(ctx, repo, issue.Number, state.PhaseReview)
+	o.setLabel(ctx, repo, issue.Number, state.PhaseReview)
 	return nil
 }
 
-// handleReviewPhase handles the PR and merge phase
-func (o *Orchestrator) handleReviewPhase(ctx context.Context, repo string, issue *providers.Issue, st *state.State, sb *sandbox.Sandbox) (bool, error) {
-	// Create PR if not exists
+func (o *Orchestrator) handleReview(ctx context.Context, repo string, issue *providers.Issue, st *state.State, sb *sandbox.Sandbox) (bool, error) {
 	if st.PRNumber == 0 {
-		o.logger.Printf("Creating pull request...")
-
-		baseBranch, err := o.provider.GetDefaultBranch(ctx, repo)
-		if err != nil {
+		o.logger.Printf("Creating PR...")
+		baseBranch, _ := o.provider.GetDefaultBranch(ctx, repo)
+		if baseBranch == "" {
 			baseBranch = o.config.Defaults.BaseBranch
 		}
 
-		prResult, err := o.prPhase.CreatePR(ctx, repo, issue, st.Plan, sb, baseBranch)
+		// Commit and push
+		if err := sb.Commit(ctx, fmt.Sprintf("Implement: %s\n\nCloses #%d", issue.Title, issue.Number)); err != nil {
+			return false, err
+		}
+		if err := sb.Push(ctx); err != nil {
+			return false, err
+		}
+
+		pr, err := o.prPhase.CreatePR(ctx, repo, issue, st.Plan, sb, baseBranch)
 		if err != nil {
-			return false, fmt.Errorf("failed to create PR: %w", err)
+			return false, err
 		}
 
-		st.PRNumber = prResult.PR.Number
-		o.logger.Printf("Created PR #%d: %s", st.PRNumber, prResult.PR.HTMLURL)
+		st.PRNumber = pr.PR.Number
+		o.logger.Printf("Created PR #%d", st.PRNumber)
 
-		// Post link to issue
-		comment := fmt.Sprintf("Created PR #%d for this issue.\n\n%s", st.PRNumber, prResult.PR.HTMLURL)
-		if err := o.provider.CreateComment(ctx, repo, issue.Number, comment); err != nil {
-			o.logger.Printf("Warning: failed to post PR link: %v", err)
-		}
-	}
-
-	// Check PR status
-	checkResult, err := o.prPhase.CheckPRStatus(ctx, repo, st.PRNumber, st.LastCommentID)
-	if err != nil {
-		return false, fmt.Errorf("failed to check PR status: %w", err)
-	}
-
-	// Handle abort
-	if checkResult.HasFeedback && checkResult.Feedback == "/abort" {
-		return false, o.abort(ctx, repo, issue.Number, st, "User requested abort")
-	}
-
-	// Handle user feedback
-	if checkResult.HasFeedback {
-		o.logger.Printf("Addressing PR feedback...")
-		_, err := o.implPhase.AddressFeedback(ctx, checkResult.Feedback, "", st, sb)
-		if err != nil {
-			return false, fmt.Errorf("failed to address feedback: %w", err)
-		}
-
-		// Update LastCommentID to avoid processing the same feedback again
-		comments, err := o.provider.GetPRComments(ctx, repo, st.PRNumber)
-		if err != nil {
-			o.logger.Printf("Warning: failed to get PR comments for LastCommentID update: %v", err)
-		} else if len(comments) > 0 {
-			st.LastCommentID = comments[len(comments)-1].ID
-		}
-
-		// Push the fix
-		if err := o.prPhase.PushFix(ctx, sb, "Address review feedback"); err != nil {
-			return false, fmt.Errorf("failed to push fix: %w", err)
-		}
-
-		return true, nil
-	}
-
-	// Handle CI failure
-	if checkResult.CIFailed {
-		o.logger.Printf("Fixing CI failure...")
-		_, err := o.implPhase.FixCIFailure(ctx, checkResult.CIOutput, st, sb)
-		if err != nil {
-			return false, fmt.Errorf("failed to fix CI: %w", err)
-		}
-
-		// Push the fix
-		if err := o.prPhase.PushFix(ctx, sb, "Fix CI failure"); err != nil {
-			return false, fmt.Errorf("failed to push CI fix: %w", err)
-		}
-
-		return true, nil
+		o.provider.CreateComment(ctx, repo, issue.Number, fmt.Sprintf("Created PR #%d: %s", st.PRNumber, pr.PR.HTMLURL))
 	}
 
 	// Check if mergeable
-	if checkResult.IsMergeable && o.config.Defaults.AutoMerge {
-		o.logger.Printf("Merging PR #%d...", st.PRNumber)
-		if err := o.prPhase.Merge(ctx, repo, st.PRNumber); err != nil {
-			return false, fmt.Errorf("failed to merge PR: %w", err)
-		}
+	mergeable, err := o.provider.IsMergeable(ctx, repo, st.PRNumber)
+	if err != nil {
+		return false, err
+	}
 
+	if mergeable && o.config.Defaults.AutoMerge {
+		o.logger.Printf("Merging PR #%d", st.PRNumber)
+		if err := o.provider.MergePR(ctx, repo, st.PRNumber); err != nil {
+			return false, err
+		}
 		st.SetPhase(state.PhaseCompleted)
-		o.updateLabels(ctx, repo, issue.Number, state.PhaseCompleted)
-
-		// Cleanup sandbox
-		if err := sb.Cleanup(); err != nil {
-			o.logger.Printf("Warning: failed to cleanup sandbox: %v", err)
-		}
-
+		o.setLabel(ctx, repo, issue.Number, state.PhaseCompleted)
+		sb.Cleanup()
 		return false, nil
 	}
 
-	// Wait for CI / reviews
-	return true, nil
+	return true, nil // Wait for CI/reviews
 }
 
-// handleError handles an error during processing
-func (o *Orchestrator) handleError(ctx context.Context, repo string, issueNum int, st *state.State, err error) {
-	o.logger.Printf("Error processing issue: %v", err)
-
+func (o *Orchestrator) fail(ctx context.Context, repo string, issueNum int, st *state.State, err error) error {
+	o.logger.Printf("Error: %v", err)
 	st.Error = err.Error()
 	st.SetPhase(state.PhaseFailed)
 
-	// Post error comment
-	comment := fmt.Sprintf("**Error during processing:**\n\n```\n%s\n```\n\nPlease check the logs for more details.", err.Error())
-	commentWithState, stateErr := st.AppendToBody(comment)
-	if stateErr != nil {
-		o.logger.Printf("Warning: failed to append state to error comment: %v", stateErr)
-		commentWithState = comment
-	}
-	if commentErr := o.provider.CreateComment(ctx, repo, issueNum, commentWithState); commentErr != nil {
-		o.logger.Printf("Warning: failed to post error comment: %v", commentErr)
-	}
-
-	o.updateLabels(ctx, repo, issueNum, state.PhaseFailed)
-}
-
-// abort aborts processing of an issue
-func (o *Orchestrator) abort(ctx context.Context, repo string, issueNum int, st *state.State, reason string) error {
-	o.logger.Printf("Aborting issue #%d: %s", issueNum, reason)
-
-	st.Error = reason
-	st.SetPhase(state.PhaseFailed)
-
-	// Post abort comment
-	comment := fmt.Sprintf("**Processing aborted:** %s", reason)
+	comment := fmt.Sprintf("**Error:**\n```\n%s\n```", err.Error())
 	commentWithState, _ := st.AppendToBody(comment)
 	o.provider.CreateComment(ctx, repo, issueNum, commentWithState)
+	o.setLabel(ctx, repo, issueNum, state.PhaseFailed)
 
-	o.updateLabels(ctx, repo, issueNum, state.PhaseFailed)
-
-	// Remove trigger label
-	o.provider.RemoveLabel(ctx, repo, issueNum, o.config.TriggerLabel)
-
-	return fmt.Errorf("aborted: %s", reason)
+	return err
 }
 
-// updateLabels updates phase labels on an issue
-func (o *Orchestrator) updateLabels(ctx context.Context, repo string, issueNum int, newPhase state.Phase) {
+func (o *Orchestrator) setLabel(ctx context.Context, repo string, issueNum int, phase state.Phase) {
 	labels := state.NewLabels()
-
-	// Remove old phase labels (ignore errors - labels may not exist)
-	for _, label := range labels.GetPhaseLabelsToRemove(newPhase) {
-		if err := o.provider.RemoveLabel(ctx, repo, issueNum, label); err != nil {
-			o.logger.Printf("Warning: failed to remove label %s: %v", label, err)
-		}
+	for _, l := range labels.GetPhaseLabelsToRemove(phase) {
+		o.provider.RemoveLabel(ctx, repo, issueNum, l)
 	}
-
-	// Add new phase label
-	if err := o.provider.AddLabel(ctx, repo, issueNum, newPhase.Label()); err != nil {
-		o.logger.Printf("Warning: failed to add label %s: %v", newPhase.Label(), err)
-	}
+	o.provider.AddLabel(ctx, repo, issueNum, phase.Label())
 }
 
-// WaitForInteraction waits for the specified duration before checking again
 func (o *Orchestrator) WaitForInteraction(ctx context.Context, duration time.Duration) error {
 	select {
 	case <-ctx.Done():

@@ -3,6 +3,8 @@ package workflow
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/anthropics/ultra-engineer/internal/claude"
@@ -24,85 +26,61 @@ func NewQAPhase(claudeClient *claude.Client, provider providers.Provider) *QAPha
 	}
 }
 
-// Result represents the result of a QA phase step
+// QAResult represents the result of a QA phase step
 type QAResult struct {
 	Questions       string
+	Plan            string
 	NoMoreQuestions bool
-	SessionID       string
 }
 
-// GenerateQuestions generates clarifying questions for an issue
-func (q *QAPhase) GenerateQuestions(ctx context.Context, issue *providers.Issue, st *state.State, workDir string) (*QAResult, error) {
-	qaHistory := claude.FormatQAHistory(st.QAHistory)
+// AnalyzeIssue analyzes the issue and generates questions + initial plan
+func (q *QAPhase) AnalyzeIssue(ctx context.Context, issue *providers.Issue, workDir string) (*QAResult, error) {
+	// Create .ultra-engineer directory
+	ueDir := filepath.Join(workDir, ".ultra-engineer")
+	os.MkdirAll(ueDir, 0755)
 
-	prompt := fmt.Sprintf(claude.Prompts.AnalyzeIssue,
-		issue.Title,
-		issue.Body,
-		qaHistory,
-	)
+	prompt := fmt.Sprintf(claude.Prompts.AnalyzeIssue, issue.Title, issue.Body)
 
-	response, sessionID, err := q.claude.RunInteractive(ctx, claude.RunOptions{
-		WorkDir:   workDir,
-		SessionID: st.SessionID,
-		Prompt:    prompt,
+	_, _, err := q.claude.RunInteractive(ctx, claude.RunOptions{
+		WorkDir:      workDir,
+		Prompt:       prompt,
+		AllowedTools: []string{"Read", "Write", "Glob", "Grep"},
 	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to generate questions: %w", err)
+		return nil, err
 	}
 
-	questions, noQuestionsNeeded := claude.ParseQuestionsResponse(response)
+	// Read questions file
+	questionsPath := filepath.Join(ueDir, "questions.md")
+	questionsData, _ := os.ReadFile(questionsPath)
+	questions := strings.TrimSpace(string(questionsData))
+
+	// Read plan file
+	planPath := filepath.Join(ueDir, "plan.md")
+	planData, _ := os.ReadFile(planPath)
+	plan := strings.TrimSpace(string(planData))
+
+	noQuestions := strings.Contains(questions, "NO_QUESTIONS_NEEDED") || questions == ""
 
 	return &QAResult{
 		Questions:       questions,
-		NoMoreQuestions: noQuestionsNeeded,
-		SessionID:       sessionID,
-	}, nil
-}
-
-// GenerateFollowUpQuestions generates follow-up questions based on previous answers
-func (q *QAPhase) GenerateFollowUpQuestions(ctx context.Context, issue *providers.Issue, st *state.State, latestAnswers string, workDir string) (*QAResult, error) {
-	qaHistory := claude.FormatQAHistory(st.QAHistory)
-
-	prompt := fmt.Sprintf(claude.Prompts.FollowUpQuestions,
-		issue.Title,
-		qaHistory,
-		latestAnswers,
-	)
-
-	response, sessionID, err := q.claude.RunInteractive(ctx, claude.RunOptions{
-		WorkDir:   workDir,
-		SessionID: st.SessionID,
-		Prompt:    prompt,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to generate follow-up questions: %w", err)
-	}
-
-	questions, noQuestionsNeeded := claude.ParseQuestionsResponse(response)
-
-	return &QAResult{
-		Questions:       questions,
-		NoMoreQuestions: noQuestionsNeeded,
-		SessionID:       sessionID,
+		Plan:            plan,
+		NoMoreQuestions: noQuestions,
 	}, nil
 }
 
 // PostQuestions posts questions as a comment on the issue
 func (q *QAPhase) PostQuestions(ctx context.Context, repo string, issueNum int, questions string, roundNum int, st *state.State) error {
 	commentBody := claude.FormatQuestionsForComment(questions, roundNum)
-
-	// Append hidden state
 	commentWithState, err := st.AppendToBody(commentBody)
 	if err != nil {
-		return fmt.Errorf("failed to append state: %w", err)
+		return err
 	}
-
 	return q.provider.CreateComment(ctx, repo, issueNum, commentWithState)
 }
 
 // ParseUserAnswers extracts user answers from a comment
 func ParseUserAnswers(comment string) string {
-	// Remove any hidden state from the answer
 	answer := state.RemoveState(comment)
 	return strings.TrimSpace(answer)
 }
@@ -110,16 +88,7 @@ func ParseUserAnswers(comment string) string {
 // IsApproval checks if a comment is an approval
 func IsApproval(comment string) bool {
 	lower := strings.ToLower(strings.TrimSpace(comment))
-	approvalPhrases := []string{
-		"approved",
-		"lgtm",
-		"looks good to me",
-		"looks good",
-		"approve",
-		"ship it",
-		"go ahead",
-		"proceed",
-	}
+	approvalPhrases := []string{"approved", "lgtm", "looks good", "ship it", "go ahead", "proceed"}
 	for _, phrase := range approvalPhrases {
 		if strings.Contains(lower, phrase) {
 			return true
@@ -136,7 +105,5 @@ func IsAbort(comment string) bool {
 
 // ExtractFeedback extracts feedback from a non-approval comment
 func ExtractFeedback(comment string) string {
-	// Remove hidden state
-	feedback := state.RemoveState(comment)
-	return strings.TrimSpace(feedback)
+	return strings.TrimSpace(state.RemoveState(comment))
 }
