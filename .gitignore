@@ -1,6 +1,6 @@
-# Binaries
-ultra-engineer
-*.exe
+# Binaries (at root level only)
+/ultra-engineer
+/*.exe
 
 # Config with secrets
 config.yaml
