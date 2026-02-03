@@ -20,10 +20,17 @@ Issue Body:
 %s
 
 If you have clarifying questions, write them to .ultra-engineer/questions.md in this format:
+
 1. [Question]
-   A. [Option]
+   A. [Option] (Recommended)
+      - Pro: [benefit]
+      - Con: [drawback]
    B. [Option]
+      - Pro: [benefit]
+      - Con: [drawback]
    C. Other (please specify)
+
+Mark your recommended option with "(Recommended)". Always include pros and cons for each option.
 
 If no questions needed, write "NO_QUESTIONS_NEEDED" to .ultra-engineer/questions.md
 
