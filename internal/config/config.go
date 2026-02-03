@@ -50,8 +50,9 @@ type RetryConfig struct {
 }
 
 type DefaultsConfig struct {
-	BaseBranch string `yaml:"base_branch"`
-	AutoMerge  bool   `yaml:"auto_merge"`
+	BaseBranch  string `yaml:"base_branch"`
+	AutoMerge   bool   `yaml:"auto_merge"`
+	BotUsername string `yaml:"bot_username"` // Username to ignore when looking for user comments
 }
 
 // Default configuration values

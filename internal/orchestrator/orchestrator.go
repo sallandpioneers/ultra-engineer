@@ -175,11 +175,12 @@ func (o *Orchestrator) handleQuestions(ctx context.Context, repo string, issue *
 		return false, err
 	}
 
-	// Find latest user answer
+	// Find latest user answer (skip bot comments and comments with state)
 	var answer *providers.Comment
 	for i := len(comments) - 1; i >= 0; i-- {
-		if !state.ContainsState(comments[i].Body) && comments[i].ID > st.LastCommentID {
-			answer = comments[i]
+		c := comments[i]
+		if c.ID > st.LastCommentID && !state.ContainsState(c.Body) && !o.isBotComment(c) {
+			answer = c
 			break
 		}
 	}
@@ -233,10 +234,12 @@ func (o *Orchestrator) handleApproval(ctx context.Context, repo string, issue *p
 		return false, err
 	}
 
+	// Find latest user response (skip bot comments and comments with state)
 	var response *providers.Comment
 	for i := len(comments) - 1; i >= 0; i-- {
-		if !state.ContainsState(comments[i].Body) && comments[i].ID > st.LastCommentID {
-			response = comments[i]
+		c := comments[i]
+		if c.ID > st.LastCommentID && !state.ContainsState(c.Body) && !o.isBotComment(c) {
+			response = c
 			break
 		}
 	}
@@ -386,4 +389,13 @@ func (o *Orchestrator) WaitForInteraction(ctx context.Context, duration time.Dur
 	case <-time.After(duration):
 		return nil
 	}
+}
+
+// isBotComment checks if a comment was made by the bot itself
+func (o *Orchestrator) isBotComment(c *providers.Comment) bool {
+	botUsername := o.config.Defaults.BotUsername
+	if botUsername == "" {
+		return false // No bot username configured, can't filter
+	}
+	return c.Author == botUsername
 }
