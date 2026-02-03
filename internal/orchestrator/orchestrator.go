@@ -160,10 +160,10 @@ func (o *Orchestrator) handleNew(ctx context.Context, repo string, issue *provid
 		o.setLabel(ctx, repo, issue.Number, state.PhasePlanning)
 	} else {
 		st.QARound = 1
+		st.SetPhase(state.PhaseQuestions) // Set phase BEFORE posting so state is correct
 		if err := o.qaPhase.PostQuestions(ctx, repo, issue.Number, result.Questions, 1, st); err != nil {
 			return err
 		}
-		st.SetPhase(state.PhaseQuestions)
 		o.setLabel(ctx, repo, issue.Number, state.PhaseQuestions)
 	}
 	return nil
