@@ -146,7 +146,7 @@ The workflow state persists these fields in the issue body:
 | `SessionID` | string | Unique identifier for this processing session |
 | `CurrentPhase` | Phase | Current workflow phase |
 | `LastUpdated` | time.Time | Timestamp of last state update |
-| `LastCommentID` | int64 | ID of last processed comment |
+| `LastCommentTime` | time.Time | Timestamp of last processed comment |
 | `Error` | string | Error message if any |
 | `QAHistory` | []QAEntry | History of Q&A exchanges |
 | `QARound` | int | Current Q&A round number |
