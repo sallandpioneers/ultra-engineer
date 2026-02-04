@@ -18,9 +18,10 @@ type Config struct {
 	GitHub GitHubConfig `yaml:"github"`
 	GitLab GitLabConfig `yaml:"gitlab"`
 
-	Claude   ClaudeConfig   `yaml:"claude"`
-	Retry    RetryConfig    `yaml:"retry"`
-	Defaults DefaultsConfig `yaml:"defaults"`
+	Claude      ClaudeConfig      `yaml:"claude"`
+	Retry       RetryConfig       `yaml:"retry"`
+	Defaults    DefaultsConfig    `yaml:"defaults"`
+	Concurrency ConcurrencyConfig `yaml:"concurrency"`
 }
 
 type GiteaConfig struct {
@@ -54,6 +55,13 @@ type DefaultsConfig struct {
 	AutoMerge  bool   `yaml:"auto_merge"`
 }
 
+// ConcurrencyConfig controls concurrent issue processing
+type ConcurrencyConfig struct {
+	MaxPerRepo          int    `yaml:"max_per_repo"`          // Maximum concurrent issues per repository (default: 1)
+	MaxTotal            int    `yaml:"max_total"`             // Maximum total concurrent issues (default: 5)
+	DependencyDetection string `yaml:"dependency_detection"`  // "auto" | "manual" | "disabled" (default: "auto")
+}
+
 // Default configuration values
 func DefaultConfig() *Config {
 	return &Config{
@@ -73,6 +81,11 @@ func DefaultConfig() *Config {
 		Defaults: DefaultsConfig{
 			BaseBranch: "main",
 			AutoMerge:  true,
+		},
+		Concurrency: ConcurrencyConfig{
+			MaxPerRepo:          1,
+			MaxTotal:            5,
+			DependencyDetection: "auto",
 		},
 	}
 }

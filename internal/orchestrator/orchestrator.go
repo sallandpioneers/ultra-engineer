@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/anthropics/ultra-engineer/internal/claude"
@@ -12,6 +13,11 @@ import (
 	"github.com/anthropics/ultra-engineer/internal/sandbox"
 	"github.com/anthropics/ultra-engineer/internal/state"
 	"github.com/anthropics/ultra-engineer/internal/workflow"
+)
+
+const (
+	// NeedsManualResolutionLabel is added when merge conflicts cannot be resolved automatically
+	NeedsManualResolutionLabel = "needs-manual-resolution"
 )
 
 // Orchestrator coordinates the issue processing workflow
@@ -296,13 +302,19 @@ func (o *Orchestrator) handleImplementing(ctx context.Context, repo string, issu
 	}
 	st.BranchName = branchName
 
-	o.logger.Printf("Implementing...")
-	if err := o.implPhase.Implement(ctx, issue.Title, sb); err != nil {
+	o.logger.Printf("Implementing with git operations...")
+	result, err := o.implPhase.ImplementWithGit(ctx, issue.Title, issue.Number, branchName, sb)
+	if err != nil {
 		return err
 	}
 
+	// Handle merge conflict
+	if result.MergeConflict {
+		return o.failWithMergeConflict(ctx, repo, issue.Number, st, result.ConflictingFiles)
+	}
+
 	o.logger.Printf("Running %d code reviews...", o.config.Claude.ReviewCycles)
-	err := o.implPhase.RunFullCodeReviewCycle(ctx, sb, func(i int) {
+	err = o.implPhase.RunFullCodeReviewCycle(ctx, sb, func(i int) {
 		o.logger.Printf("Code review %d/%d", i, o.config.Claude.ReviewCycles)
 	})
 	if err != nil {
@@ -322,13 +334,8 @@ func (o *Orchestrator) handleReview(ctx context.Context, repo string, issue *pro
 			baseBranch = o.config.Defaults.BaseBranch
 		}
 
-		// Commit and push
-		if err := sb.Commit(ctx, fmt.Sprintf("Implement: %s\n\nCloses #%d", issue.Title, issue.Number)); err != nil {
-			return false, err
-		}
-		if err := sb.Push(ctx); err != nil {
-			return false, err
-		}
+		// Note: Claude already committed and pushed the branch during implementation
+		// We just need to create the PR now
 
 		pr, err := o.prPhase.CreatePR(ctx, repo, issue, sb, baseBranch)
 		if err != nil {
@@ -374,6 +381,95 @@ func (o *Orchestrator) fail(ctx context.Context, repo string, issueNum int, st *
 	return err
 }
 
+// failWithMergeConflict handles the case when Claude cannot resolve a merge conflict
+func (o *Orchestrator) failWithMergeConflict(ctx context.Context, repo string, issueNum int, st *state.State, conflictingFiles []string) error {
+	o.logger.Printf("Merge conflict in files: %v", conflictingFiles)
+
+	st.FailureReason = "merge_conflict"
+	st.Error = fmt.Sprintf("Merge conflict in: %s", strings.Join(conflictingFiles, ", "))
+	st.SetPhase(state.PhaseFailed)
+
+	// Format the conflict message
+	var sb strings.Builder
+	sb.WriteString("**Merge Conflict**\n\n")
+	sb.WriteString("Unable to automatically resolve merge conflicts in the following files:\n\n")
+	for _, f := range conflictingFiles {
+		sb.WriteString(fmt.Sprintf("- `%s`\n", f))
+	}
+	sb.WriteString("\n**What was attempted:**\n")
+	sb.WriteString("- Fetched latest changes from origin/main\n")
+	sb.WriteString("- Attempted to rebase onto main\n")
+	sb.WriteString("- Tried to resolve conflicts using code context\n\n")
+	sb.WriteString("**To resolve:**\n")
+	sb.WriteString("1. Manually resolve the conflicts in the listed files\n")
+	sb.WriteString("2. Push the resolved changes to the branch\n")
+	sb.WriteString("3. Comment `/retry` to re-trigger processing\n")
+
+	commentWithState, _ := st.AppendToBody(sb.String())
+	o.provider.CreateComment(ctx, repo, issueNum, commentWithState)
+
+	// Update labels
+	o.setLabel(ctx, repo, issueNum, state.PhaseFailed)
+	o.provider.RemoveLabel(ctx, repo, issueNum, o.config.TriggerLabel)
+	o.provider.AddLabel(ctx, repo, issueNum, NeedsManualResolutionLabel)
+
+	return fmt.Errorf("merge conflict: %s", strings.Join(conflictingFiles, ", "))
+}
+
+// CheckForRetry checks if a failed issue has a /retry comment and should be retried
+func (o *Orchestrator) CheckForRetry(ctx context.Context, repo string, issue *providers.Issue, st *state.State) bool {
+	// Only check issues that need manual resolution
+	hasNeedsManualLabel := false
+	for _, label := range issue.Labels {
+		if label == NeedsManualResolutionLabel {
+			hasNeedsManualLabel = true
+			break
+		}
+	}
+	if !hasNeedsManualLabel {
+		return false
+	}
+
+	// Check for /retry comment after the failure
+	comments, err := o.provider.GetComments(ctx, repo, issue.Number)
+	if err != nil {
+		return false
+	}
+
+	for i := len(comments) - 1; i >= 0; i-- {
+		c := comments[i]
+		if c.ID > st.LastCommentID && !state.IsBotComment(c.Body) {
+			body := strings.TrimSpace(strings.ToLower(c.Body))
+			if body == "/retry" || strings.HasPrefix(body, "/retry ") {
+				// Found retry command - reset state for retry
+				o.logger.Printf("Retry requested for issue #%d", issue.Number)
+
+				st.FailureReason = ""
+				st.Error = ""
+				st.SetPhase(state.PhaseImplementing)
+				st.LastCommentID = c.ID
+
+				// Update labels
+				o.provider.RemoveLabel(ctx, repo, issue.Number, NeedsManualResolutionLabel)
+				o.provider.RemoveLabel(ctx, repo, issue.Number, state.PhaseFailed.Label())
+				o.provider.AddLabel(ctx, repo, issue.Number, o.config.TriggerLabel)
+				o.setLabel(ctx, repo, issue.Number, state.PhaseImplementing)
+
+				// React to acknowledge
+				o.provider.ReactToComment(ctx, repo, c.ID, "+1")
+
+				// Post comment about retry
+				o.provider.CreateComment(ctx, repo, issue.Number,
+					state.AddBotMarker("Retrying implementation..."))
+
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
 func (o *Orchestrator) setLabel(ctx context.Context, repo string, issueNum int, phase state.Phase) {
 	labels := state.NewLabels()
 	for _, l := range labels.GetPhaseLabelsToRemove(phase) {
@@ -389,5 +485,116 @@ func (o *Orchestrator) WaitForInteraction(ctx context.Context, duration time.Dur
 	case <-time.After(duration):
 		return nil
 	}
+}
+
+// CanProceed checks if all dependencies are satisfied (completed, not just in-progress)
+// repoStates is the subset of allStates for the given repo (issueNum -> state)
+func (o *Orchestrator) CanProceed(ctx context.Context, repo string, issue *providers.Issue, st *state.State, repoStates map[int]*state.State) bool {
+	if len(st.DependsOn) == 0 {
+		return true
+	}
+
+	for _, depNum := range st.DependsOn {
+		depState, exists := repoStates[depNum]
+		if !exists {
+			// Dependency not tracked - might be completed or doesn't exist
+			// Try to check via provider
+			depIssue, err := o.provider.GetIssue(ctx, repo, depNum)
+			if err != nil {
+				// Can't find dependency - block to be safe
+				return false
+			}
+			depPhase := state.ParsePhaseFromLabels(depIssue.Labels)
+			if depPhase != state.PhaseCompleted {
+				return false
+			}
+			continue
+		}
+
+		// Check if dependency is completed
+		if depState.CurrentPhase != state.PhaseCompleted {
+			return false
+		}
+	}
+
+	return true
+}
+
+// CheckAndUnblockIssues re-evaluates blocked issues after any issue completes or fails
+// If a dependency failed, dependent issues should also be marked as failed
+// Returns list of newly-ready issues that should be submitted to the worker pool
+func (o *Orchestrator) CheckAndUnblockIssues(ctx context.Context, repo string, completedOrFailedIssue int, repoStates map[int]*state.State) ([]*providers.Issue, error) {
+	var readyIssues []*providers.Issue
+
+	completedState, exists := repoStates[completedOrFailedIssue]
+	if !exists {
+		return nil, nil
+	}
+
+	// Check each issue that might depend on the completed/failed issue
+	for issueNum, st := range repoStates {
+		if issueNum == completedOrFailedIssue {
+			continue
+		}
+
+		// Skip if not blocked or already processing
+		if len(st.BlockedBy) == 0 {
+			continue
+		}
+
+		// Check if this issue was blocked by the completed/failed one
+		wasBlocked := false
+		for _, blockedBy := range st.BlockedBy {
+			if blockedBy == completedOrFailedIssue {
+				wasBlocked = true
+				break
+			}
+		}
+
+		if !wasBlocked {
+			continue
+		}
+
+		// If dependency failed, mark this issue as failed too
+		if completedState.CurrentPhase == state.PhaseFailed {
+			st.CurrentPhase = state.PhaseFailed
+			st.FailureReason = "dependency_failed"
+			st.Error = fmt.Sprintf("Dependency #%d failed", completedOrFailedIssue)
+
+			// Post comment about the failure
+			comment := fmt.Sprintf("**Blocked:** Dependency #%d failed. This issue cannot proceed until the dependency is resolved.\n\nRetry with `/retry` after fixing the dependency.", completedOrFailedIssue)
+			commentWithState, _ := st.AppendToBody(comment)
+			o.provider.CreateComment(ctx, repo, issueNum, commentWithState)
+			o.setLabel(ctx, repo, issueNum, state.PhaseFailed)
+			continue
+		}
+
+		// Dependency completed - update blocked_by
+		var newBlockedBy []int
+		for _, b := range st.BlockedBy {
+			if b != completedOrFailedIssue {
+				newBlockedBy = append(newBlockedBy, b)
+			}
+		}
+		st.BlockedBy = newBlockedBy
+
+		// If no longer blocked, add to ready list
+		if len(st.BlockedBy) == 0 {
+			// Get the issue from provider
+			issue, err := o.provider.GetIssue(ctx, repo, issueNum)
+			if err != nil {
+				o.logger.Printf("Failed to get issue #%d: %v", issueNum, err)
+				continue
+			}
+
+			// Post comment that we're unblocked
+			comment := fmt.Sprintf("Dependency #%d completed. Proceeding with this issue.", completedOrFailedIssue)
+			o.provider.CreateComment(ctx, repo, issueNum, state.AddBotMarker(comment))
+
+			readyIssues = append(readyIssues, issue)
+		}
+	}
+
+	return readyIssues, nil
 }
 
