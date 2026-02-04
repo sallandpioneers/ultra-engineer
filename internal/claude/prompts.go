@@ -7,12 +7,13 @@ import (
 
 // Prompts contains all the prompt templates used by the orchestrator
 var Prompts = struct {
-	AnalyzeIssue string
-	ReviewPlan   string
-	ReviewCode   string
-	Implement    string
-	ImplementGit string // Implementation with git commit/push to branch
-	FixCI        string
+	AnalyzeIssue     string
+	ReviewPlan       string
+	ReviewCode       string
+	Implement        string
+	ImplementGit     string // Implementation with git commit/push to branch
+	FixCI            string
+	SummarizeChanges string
 }{
 	AnalyzeIssue: `Analyze this issue and decide if you need clarifying questions.
 
@@ -110,6 +111,22 @@ Error:
 %s
 
 Fix the code and output "FIX_COMPLETE" when done.`,
+
+	SummarizeChanges: `Summarize the code changes for a PR description.
+
+Run git diff origin/%s...%s to see the changes, then provide a concise summary in this format:
+
+## Summary
+[1-2 sentences describing what was implemented]
+
+## Changes
+[List each file changed with a brief description, e.g.:]
+- ` + "`path/to/file.go`" + ` - Description of changes
+
+## Notes
+[Any notable decisions, trade-offs, or testing notes. Omit if none.]
+
+Keep it brief and focus on the "what" and "why". Do not include markdown code blocks in your response.`,
 }
 
 // QAEntry represents a Q&A round
