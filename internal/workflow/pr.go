@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/anthropics/ultra-engineer/internal/providers"
-	"github.com/anthropics/ultra-engineer/internal/sandbox"
 )
 
 // PRPhase handles the PR creation and merge phase
@@ -26,13 +25,13 @@ type PRResult struct {
 }
 
 // CreatePR creates a pull request from the implementation
-func (p *PRPhase) CreatePR(ctx context.Context, repo string, issue *providers.Issue, sb *sandbox.Sandbox, baseBranch string) (*PRResult, error) {
+func (p *PRPhase) CreatePR(ctx context.Context, repo string, issue *providers.Issue, headBranch, baseBranch string) (*PRResult, error) {
 	prBody := p.formatPRBody(issue)
 
 	pr, err := p.provider.CreatePR(ctx, repo, providers.PRCreate{
 		Title:   fmt.Sprintf("Implement: %s", issue.Title),
 		Body:    prBody,
-		Head:    sb.BranchName,
+		Head:    headBranch,
 		Base:    baseBranch,
 		IssueID: issue.Number,
 	})

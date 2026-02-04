@@ -33,6 +33,16 @@ func ParseMergeConflictMarker(output string) []string {
 	return result
 }
 
+// ParseBranchName extracts branch name from Claude's output (IMPLEMENTATION_COMPLETE <branch-name>)
+func ParseBranchName(output string) string {
+	re := regexp.MustCompile(`IMPLEMENTATION_COMPLETE\s+(\S+)`)
+	matches := re.FindStringSubmatch(output)
+	if len(matches) < 2 {
+		return ""
+	}
+	return strings.TrimSpace(matches[1])
+}
+
 // HasGitError checks if the output contains common git error patterns
 func HasGitError(output string) bool {
 	errorPatterns := []string{
@@ -86,15 +96,16 @@ func (i *ImplementationPhase) Implement(ctx context.Context, issueTitle string, 
 
 // ImplementResult contains the result of implementation with git operations
 type ImplementResult struct {
-	Success              bool
-	MergeConflict        bool
-	ConflictingFiles     []string
-	Output               string
+	Success          bool
+	MergeConflict    bool
+	ConflictingFiles []string
+	BranchName       string // Branch name chosen by Claude (for PR workflow)
+	Output           string
 }
 
-// ImplementWithGit executes the implementation plan and handles git commit/push
-func (i *ImplementationPhase) ImplementWithGit(ctx context.Context, issueTitle string, issueNum int, branchName string, sb *sandbox.Sandbox) (*ImplementResult, error) {
-	prompt := fmt.Sprintf(claude.Prompts.ImplementGit, issueTitle, branchName, issueTitle, issueNum, branchName)
+// ImplementWithGit executes the implementation plan and handles git commit/push to a branch
+func (i *ImplementationPhase) ImplementWithGit(ctx context.Context, issueTitle string, issueNum int, baseBranch string, sb *sandbox.Sandbox) (*ImplementResult, error) {
+	prompt := fmt.Sprintf(claude.Prompts.ImplementGit, issueNum, issueTitle, baseBranch, issueNum, issueNum, baseBranch, baseBranch, baseBranch)
 
 	output, _, err := i.claude.RunInteractive(ctx, claude.RunOptions{
 		WorkDir:      sb.RepoDir,
@@ -122,6 +133,8 @@ func (i *ImplementationPhase) ImplementWithGit(ctx context.Context, issueTitle s
 		return result, err
 	}
 
+	// Extract branch name from output (IMPLEMENTATION_COMPLETE <branch-name>)
+	result.BranchName = ParseBranchName(output)
 	result.Success = true
 	return result, nil
 }

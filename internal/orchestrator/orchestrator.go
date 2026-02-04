@@ -296,14 +296,13 @@ func (o *Orchestrator) handleApproval(ctx context.Context, repo string, issue *p
 }
 
 func (o *Orchestrator) handleImplementing(ctx context.Context, repo string, issue *providers.Issue, st *state.State, sb *sandbox.Sandbox) error {
-	branchName := fmt.Sprintf("ultra-engineer/issue-%d", issue.Number)
-	if err := sb.CreateBranch(ctx, branchName); err != nil {
-		return err
+	baseBranch := o.config.Defaults.BaseBranch
+	if b, _ := o.provider.GetDefaultBranch(ctx, repo); b != "" {
+		baseBranch = b
 	}
-	st.BranchName = branchName
 
 	o.logger.Printf("Implementing with git operations...")
-	result, err := o.implPhase.ImplementWithGit(ctx, issue.Title, issue.Number, branchName, sb)
+	result, err := o.implPhase.ImplementWithGit(ctx, issue.Title, issue.Number, baseBranch, sb)
 	if err != nil {
 		return err
 	}
@@ -311,6 +310,11 @@ func (o *Orchestrator) handleImplementing(ctx context.Context, repo string, issu
 	// Handle merge conflict
 	if result.MergeConflict {
 		return o.failWithMergeConflict(ctx, repo, issue.Number, st, result.ConflictingFiles)
+	}
+
+	// Store branch name from Claude's choice (for PR workflow)
+	if result.BranchName != "" {
+		st.BranchName = result.BranchName
 	}
 
 	o.logger.Printf("Running %d code reviews...", o.config.Claude.ReviewCycles)
@@ -337,7 +341,7 @@ func (o *Orchestrator) handleReview(ctx context.Context, repo string, issue *pro
 		// Note: Claude already committed and pushed the branch during implementation
 		// We just need to create the PR now
 
-		pr, err := o.prPhase.CreatePR(ctx, repo, issue, sb, baseBranch)
+		pr, err := o.prPhase.CreatePR(ctx, repo, issue, st.BranchName, baseBranch)
 		if err != nil {
 			return false, err
 		}

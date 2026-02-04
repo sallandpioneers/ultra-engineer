@@ -7,12 +7,12 @@ import (
 
 // Prompts contains all the prompt templates used by the orchestrator
 var Prompts = struct {
-	AnalyzeIssue  string
-	ReviewPlan    string
-	ReviewCode    string
-	Implement     string
-	ImplementGit  string // Implementation with git commit/push instructions
-	FixCI         string
+	AnalyzeIssue string
+	ReviewPlan   string
+	ReviewCode   string
+	Implement    string
+	ImplementGit string // Implementation with git commit/push to branch
+	FixCI        string
 }{
 	AnalyzeIssue: `Analyze this issue and decide if you need clarifying questions.
 
@@ -59,33 +59,50 @@ Then write your implementation plan to .ultra-engineer/plan.md with:
 
 	ImplementGit: `Implement the plan from .ultra-engineer/plan.md
 
-Issue: %s
-Branch: %s
+Issue #%d: %s
+Base branch: %s
 
 After implementing the code changes:
 
-1. **Stage and commit** your changes:
-   - git add <specific files you changed>
-   - git commit -m "Implement: %s
+## 1. Create a branch
+Choose a descriptive branch name based on the issue (e.g., feat/add-user-auth, fix/login-timeout).
+- git checkout -b <your-branch-name>
 
-Closes #%d"
+## 2. Commit your changes
+Write meaningful commit messages:
+- Use conventional commits: type(scope): description
+  - feat: new feature
+  - fix: bug fix
+  - refactor: code change that neither fixes a bug nor adds a feature
+  - docs: documentation only
+  - test: adding or fixing tests
+  - chore: maintenance tasks
+- Explain WHY in the commit body, not just what
+- Create multiple commits if changes are logically separate
+- Reference the issue in your final commit: "Closes #%d"
 
-2. **Handle merge conflicts** before pushing:
-   - git fetch origin main
-   - git rebase origin/main
-   - If conflicts occur:
-     a. Resolve them using your understanding of the code context
-     b. git add <resolved files>
-     c. git rebase --continue
-   - If you cannot resolve a conflict, output:
-     MERGE_CONFLICT_UNRESOLVED: <comma-separated list of conflicting files>
+Example:
+  git add <files>
+  git commit -m "feat(auth): add session timeout handling
 
-3. **Push the branch**:
-   - git push -u origin %s
+  Users were getting logged out unexpectedly. Added configurable
+  timeout with refresh token support.
 
-If push fails due to remote changes, fetch and rebase again, then retry push.
+  Closes #%d"
 
-Output "IMPLEMENTATION_COMPLETE" when all code is implemented, committed, and pushed successfully.`,
+## 3. Integrate upstream changes
+- git fetch origin %s
+- Prefer rebase for clean history: git rebase origin/%s
+- If rebase conflicts are too complex, use merge: git merge origin/%s
+- Resolve conflicts using your understanding of the code
+- If you cannot resolve a conflict, output:
+  MERGE_CONFLICT_UNRESOLVED: <comma-separated list of files>
+
+## 4. Push the branch
+- git push -u origin <your-branch-name>
+- If push fails due to remote changes, fetch/rebase and retry
+
+Output "IMPLEMENTATION_COMPLETE <branch-name>" when done.`,
 
 	FixCI: `CI failed. Fix the issues.
 
