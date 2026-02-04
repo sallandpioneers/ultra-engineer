@@ -66,6 +66,7 @@ type Provider interface {
 	CreatePR(ctx context.Context, repo string, pr PRCreate) (*PR, error)
 	GetPR(ctx context.Context, repo string, number int) (*PR, error)
 	GetPRComments(ctx context.Context, repo string, number int) ([]*Comment, error)
+	GetPRReviewComments(ctx context.Context, repo string, number int) ([]*Comment, error)
 	MergePR(ctx context.Context, repo string, number int) error
 	IsMergeable(ctx context.Context, repo string, number int) (bool, error)
 

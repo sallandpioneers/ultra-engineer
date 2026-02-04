@@ -80,14 +80,14 @@ type ghComment struct {
 }
 
 type ghPR struct {
-	Number         int    `json:"number"`
-	Title          string `json:"title"`
-	Body           string `json:"body"`
-	State          string `json:"state"`
+	Number           int    `json:"number"`
+	Title            string `json:"title"`
+	Body             string `json:"body"`
+	State            string `json:"state"`
 	MergeStateStatus string `json:"mergeStateStatus"`
-	URL            string `json:"url"`
-	HeadRefName    string `json:"headRefName"`
-	BaseRefName    string `json:"baseRefName"`
+	URL              string `json:"url"`
+	HeadRefName      string `json:"headRefName"`
+	BaseRefName      string `json:"baseRefName"`
 }
 
 func (g *GitHubProvider) GetIssue(ctx context.Context, repo string, number int) (*Issue, error) {
@@ -304,6 +304,40 @@ func (g *GitHubProvider) GetPRComments(ctx context.Context, repo string, number 
 			ID:        id,
 			Body:      c.Body,
 			Author:    c.Author.Login,
+			CreatedAt: c.CreatedAt,
+		}
+	}
+
+	return result, nil
+}
+
+// ghReviewComment represents the REST API response for PR review comments (inline code comments)
+type ghReviewComment struct {
+	ID        int64     `json:"id"`
+	Body      string    `json:"body"`
+	User      ghUser    `json:"user"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+func (g *GitHubProvider) GetPRReviewComments(ctx context.Context, repo string, number int) ([]*Comment, error) {
+	// Use gh api to fetch inline review comments from the REST API
+	// Endpoint: repos/{owner}/{repo}/pulls/{pull_number}/comments
+	out, err := g.runGH(ctx, "api", fmt.Sprintf("repos/%s/pulls/%d/comments", repo, number))
+	if err != nil {
+		return nil, err
+	}
+
+	var comments []ghReviewComment
+	if err := json.Unmarshal(out, &comments); err != nil {
+		return nil, fmt.Errorf("failed to parse review comments: %w", err)
+	}
+
+	result := make([]*Comment, len(comments))
+	for i, c := range comments {
+		result[i] = &Comment{
+			ID:        c.ID,
+			Body:      c.Body,
+			Author:    c.User.Login,
 			CreatedAt: c.CreatedAt,
 		}
 	}

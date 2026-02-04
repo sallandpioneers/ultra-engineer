@@ -43,6 +43,10 @@ type State struct {
 	LastCommentID   int64            `json:"last_comment_id,omitempty"`
 	Error           string           `json:"error,omitempty"`
 
+	// PR comment tracking - uses timestamp for ordering since PR comments and review
+	// comments come from different API endpoints with different ID spaces
+	LastPRCommentTime time.Time `json:"last_pr_comment_time,omitempty"`
+
 	// Dependency tracking for concurrent issue processing
 	DependsOn     []int  `json:"depends_on,omitempty"`     // Issue numbers this issue depends on
 	BlockedBy     []int  `json:"blocked_by,omitempty"`     // Currently blocking issue numbers
