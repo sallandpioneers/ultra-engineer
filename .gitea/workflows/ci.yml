@@ -11,22 +11,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: 'go.mod'
       - name: Install golangci-lint
         run: |
-          curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v1.62.2
+          go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.62.2
       - name: Run golangci-lint
-        run: $(go env GOPATH)/bin/golangci-lint run --timeout=5m
+        run: golangci-lint run --timeout=5m
 
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: 'go.mod'
       - name: Build
         run: go build -v ./...
 
@@ -34,9 +28,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: 'go.mod'
       - name: Run tests with coverage
         run: go test -v -race -coverprofile=coverage.out -covermode=atomic ./...
       - name: Display coverage
