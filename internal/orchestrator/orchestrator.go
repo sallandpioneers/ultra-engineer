@@ -48,7 +48,7 @@ func New(cfg *config.Config, provider providers.Provider, logger *log.Logger) *O
 		qaPhase:   workflow.NewQAPhase(claudeClient, provider),
 		planPhase: workflow.NewPlanningPhase(claudeClient, provider, cfg.Claude.ReviewCycles),
 		implPhase: workflow.NewImplementationPhase(claudeClient, provider, cfg.Claude.ReviewCycles),
-		prPhase:   workflow.NewPRPhase(provider),
+		prPhase:   workflow.NewPRPhase(provider, claudeClient),
 	}
 }
 
@@ -341,7 +341,7 @@ func (o *Orchestrator) handleReview(ctx context.Context, repo string, issue *pro
 		// Note: Claude already committed and pushed the branch during implementation
 		// We just need to create the PR now
 
-		pr, err := o.prPhase.CreatePR(ctx, repo, issue, st.BranchName, baseBranch)
+		pr, err := o.prPhase.CreatePR(ctx, repo, issue, st.BranchName, baseBranch, sb.RepoDir)
 		if err != nil {
 			return false, err
 		}
