@@ -1,0 +1,43 @@
+run:
+  timeout: 5m
+  go: '1.23'
+
+linters:
+  enable:
+    - errcheck      # Check for unchecked errors
+    - gosimple      # Simplify code
+    - govet         # Go vet checks
+    - ineffassign   # Detect ineffectual assignments
+    - staticcheck   # Static analysis
+    - unused        # Find unused code
+    - gofmt         # Check formatting
+    - goimports     # Check imports
+    - misspell      # Find misspellings
+    - gocritic      # Opinionated linter
+
+linters-settings:
+  errcheck:
+    check-type-assertions: true
+    exclude-functions:
+      - io.ReadAll
+      - (*os/exec.Cmd).StderrPipe
+  gocritic:
+    enabled-tags:
+      - diagnostic
+      - style
+  misspell:
+    locale: US
+
+issues:
+  exclude-use-default: false
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  exclude-rules:
+    # Allow ignored errors for file reads that have fallback behavior
+    - path: internal/workflow/qa.go
+      linters:
+        - errcheck
+    - path: internal/orchestrator/
+      linters:
+        - errcheck
+      text: "AppendToBody"
