@@ -214,6 +214,17 @@ func (d *Daemon) filterPendingIssues(ctx context.Context, issues []issueInfo) []
 			}
 		}
 
+		// Skip failed issues unless retry was requested
+		if st.CurrentPhase == state.PhaseFailed {
+			if d.orchestrator.CheckForRetry(ctx, info.repo, info.issue, st) {
+				d.logger.Printf("Retry requested for issue #%d", info.issue.Number)
+				// State was updated by CheckForRetry, continue to process
+			} else {
+				// Skip - failed and no retry requested
+				continue
+			}
+		}
+
 		// Store state in our tracking map
 		d.allStatesMu.Lock()
 		if d.allStates[info.repo] == nil {

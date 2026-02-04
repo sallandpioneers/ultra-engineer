@@ -656,15 +656,8 @@ func (o *Orchestrator) failWithMergeConflict(ctx context.Context, repo string, i
 
 // CheckForRetry checks if a failed issue has a /retry comment and should be retried
 func (o *Orchestrator) CheckForRetry(ctx context.Context, repo string, issue *providers.Issue, st *state.State) bool {
-	// Only check issues that need manual resolution
-	hasNeedsManualLabel := false
-	for _, label := range issue.Labels {
-		if label == NeedsManualResolutionLabel {
-			hasNeedsManualLabel = true
-			break
-		}
-	}
-	if !hasNeedsManualLabel {
+	// Check if issue is in failed phase
+	if st.CurrentPhase != state.PhaseFailed {
 		return false
 	}
 
@@ -696,9 +689,10 @@ func (o *Orchestrator) CheckForRetry(ctx context.Context, repo string, issue *pr
 				// React to acknowledge
 				o.provider.ReactToComment(ctx, repo, c.ID, "+1")
 
-				// Post comment about retry
-				o.provider.CreateComment(ctx, repo, issue.Number,
-					state.AddBotMarker("Retrying implementation..."))
+				// Post comment about retry with updated state
+				comment := state.AddBotMarker("Retrying implementation...")
+				commentWithState, _ := st.AppendToBody(comment)
+				o.provider.CreateComment(ctx, repo, issue.Number, commentWithState)
 
 				return true
 			}
