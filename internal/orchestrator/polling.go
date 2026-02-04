@@ -21,11 +21,11 @@ type Daemon struct {
 	logger       *log.Logger
 
 	// Concurrent processing
-	workerPool         *WorkerPool
-	depDetector        *DependencyDetector
-	allStates          map[string]map[int]*state.State // repo -> issueNum -> state
-	allStatesMu        sync.RWMutex
-	claudeClient       *claude.Client
+	workerPool   *WorkerPool
+	depDetector  *DependencyDetector
+	allStates    map[string]map[int]*state.State // repo -> issueNum -> state
+	allStatesMu  sync.RWMutex
+	claudeClient *claude.Client
 
 	// Legacy single-issue tracking (for RunOnce)
 	currentRepo  string

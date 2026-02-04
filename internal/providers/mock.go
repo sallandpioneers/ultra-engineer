@@ -12,11 +12,12 @@ type MockProvider struct {
 	mu sync.RWMutex
 
 	// Issue storage
-	Issues   map[string]map[int]*Issue   // repo -> issueNum -> issue
+	Issues   map[string]map[int]*Issue     // repo -> issueNum -> issue
 	Comments map[string]map[int][]*Comment // repo -> issueNum -> comments
 
 	// PR storage
-	PRs map[string]map[int]*PR // repo -> prNum -> pr
+	PRs              map[string]map[int]*PR        // repo -> prNum -> pr
+	PRReviewComments map[string]map[int][]*Comment // repo -> prNum -> review comments
 
 	// Tracking calls for assertions
 	CreatedComments []MockComment
@@ -64,10 +65,11 @@ type MockReaction struct {
 // NewMockProvider creates a new mock provider
 func NewMockProvider() *MockProvider {
 	return &MockProvider{
-		Issues:        make(map[string]map[int]*Issue),
-		Comments:      make(map[string]map[int][]*Comment),
-		PRs:           make(map[string]map[int]*PR),
-		DefaultBranch: "main",
+		Issues:           make(map[string]map[int]*Issue),
+		Comments:         make(map[string]map[int][]*Comment),
+		PRs:              make(map[string]map[int]*PR),
+		PRReviewComments: make(map[string]map[int][]*Comment),
+		DefaultBranch:    "main",
 	}
 }
 
@@ -300,6 +302,30 @@ func (m *MockProvider) GetPRComments(ctx context.Context, repo string, number in
 	return []*Comment{}, nil
 }
 
+// GetPRReviewComments implements Provider
+func (m *MockProvider) GetPRReviewComments(ctx context.Context, repo string, number int) ([]*Comment, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	if repoComments, ok := m.PRReviewComments[repo]; ok {
+		if comments, ok := repoComments[number]; ok {
+			return comments, nil
+		}
+	}
+	return []*Comment{}, nil
+}
+
+// AddPRReviewComment adds a review comment to a PR (for testing)
+func (m *MockProvider) AddPRReviewComment(repo string, prNum int, comment *Comment) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.PRReviewComments[repo] == nil {
+		m.PRReviewComments[repo] = make(map[int][]*Comment)
+	}
+	m.PRReviewComments[repo][prNum] = append(m.PRReviewComments[repo][prNum], comment)
+}
+
 // MergePR implements Provider
 func (m *MockProvider) MergePR(ctx context.Context, repo string, number int) error {
 	if m.MergeError != nil {
@@ -379,6 +405,7 @@ func (m *MockProvider) Reset() {
 	m.Issues = make(map[string]map[int]*Issue)
 	m.Comments = make(map[string]map[int][]*Comment)
 	m.PRs = make(map[string]map[int]*PR)
+	m.PRReviewComments = make(map[string]map[int][]*Comment)
 	m.CreatedComments = nil
 	m.UpdatedComments = nil
 	m.AddedLabels = nil

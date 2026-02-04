@@ -385,6 +385,61 @@ func (g *GiteaProvider) GetPRComments(ctx context.Context, repo string, number i
 	return result, nil
 }
 
+// giteaReview represents a review from Gitea's API
+type giteaReview struct {
+	ID int64 `json:"id"`
+}
+
+// giteaReviewComment represents a review comment from Gitea's API
+type giteaReviewComment struct {
+	ID        int64     `json:"id"`
+	Body      string    `json:"body"`
+	User      giteaUser `json:"user"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+func (g *GiteaProvider) GetPRReviewComments(ctx context.Context, repo string, number int) ([]*Comment, error) {
+	// Gitea's API structure: first list all reviews, then fetch comments from each review
+	// Endpoint: /repos/{owner}/{repo}/pulls/{index}/reviews
+	reviewsPath := fmt.Sprintf("/repos/%s/pulls/%d/reviews", repo, number)
+	reviewsData, err := g.doRequest(ctx, "GET", reviewsPath, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var reviews []giteaReview
+	if err := json.Unmarshal(reviewsData, &reviews); err != nil {
+		return nil, fmt.Errorf("failed to parse reviews: %w", err)
+	}
+
+	// Fetch comments from each review
+	var allComments []*Comment
+	for _, review := range reviews {
+		commentsPath := fmt.Sprintf("/repos/%s/pulls/%d/reviews/%d/comments", repo, number, review.ID)
+		commentsData, err := g.doRequest(ctx, "GET", commentsPath, nil)
+		if err != nil {
+			// Log error but continue to process other reviews
+			continue
+		}
+
+		var reviewComments []giteaReviewComment
+		if err := json.Unmarshal(commentsData, &reviewComments); err != nil {
+			continue
+		}
+
+		for _, rc := range reviewComments {
+			allComments = append(allComments, &Comment{
+				ID:        rc.ID,
+				Body:      rc.Body,
+				Author:    rc.User.Login,
+				CreatedAt: rc.CreatedAt,
+			})
+		}
+	}
+
+	return allComments, nil
+}
+
 func (g *GiteaProvider) MergePR(ctx context.Context, repo string, number int) error {
 	path := fmt.Sprintf("/repos/%s/pulls/%d/merge", repo, number)
 	_, err := g.doRequest(ctx, "POST", path, map[string]string{

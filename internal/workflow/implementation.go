@@ -177,13 +177,31 @@ func (i *ImplementationPhase) FixCIFailure(ctx context.Context, ciOutput string,
 }
 
 // AddressFeedback addresses user feedback on the implementation
-func (i *ImplementationPhase) AddressFeedback(ctx context.Context, feedback string, sb *sandbox.Sandbox) error {
-	prompt := fmt.Sprintf(`Address this feedback on the implementation:
+// If branchName is provided, it will also commit and push the changes after fixing
+func (i *ImplementationPhase) AddressFeedback(ctx context.Context, feedback string, sb *sandbox.Sandbox, branchName string) error {
+	var prompt string
+	if branchName != "" {
+		prompt = fmt.Sprintf(`You have received feedback on your implementation. Please address the following feedback by making the necessary code changes:
+
+%s
+
+Read .ultra-engineer/plan.md for context.
+
+After making the changes:
+1. Stage all changes with: git add -A
+2. Commit with a descriptive message about what feedback was addressed
+3. Push to the branch: git push origin %s
+
+If the feedback doesn't require any code changes, do not commit or push.
+Output "FEEDBACK_ADDRESSED" when done.`, feedback, branchName)
+	} else {
+		prompt = fmt.Sprintf(`Address this feedback on the implementation:
 
 %s
 
 Read .ultra-engineer/plan.md for context. Fix any issues in the code.
 Output "FEEDBACK_ADDRESSED" when done.`, feedback)
+	}
 
 	_, _, err := i.claude.RunInteractive(ctx, claude.RunOptions{
 		WorkDir:      sb.RepoDir,

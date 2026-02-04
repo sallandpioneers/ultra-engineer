@@ -373,7 +373,63 @@ func (o *Orchestrator) handleReview(ctx context.Context, repo string, issue *pro
 		st.PRNumber = pr.PR.Number
 		o.logger.Printf("Created PR #%d", st.PRNumber)
 
+		// Initialize LastPRCommentTime after PR creation to avoid processing old comments
+		st.LastPRCommentTime = time.Now()
+
 		o.provider.CreateComment(ctx, repo, issue.Number, state.AddBotMarker(fmt.Sprintf("Created PR #%d: %s", st.PRNumber, pr.PR.HTMLURL)))
+	}
+
+	// Check for PR feedback (general comments and inline review comments)
+	var allComments []*providers.Comment
+
+	prComments, err := o.provider.GetPRComments(ctx, repo, st.PRNumber)
+	if err != nil {
+		o.logger.Printf("Warning: failed to fetch PR comments: %v", err)
+	} else {
+		allComments = append(allComments, prComments...)
+	}
+
+	reviewComments, err := o.provider.GetPRReviewComments(ctx, repo, st.PRNumber)
+	if err != nil {
+		o.logger.Printf("Warning: failed to fetch PR review comments: %v", err)
+	} else {
+		allComments = append(allComments, reviewComments...)
+	}
+
+	// Filter for new comments using CreatedAt timestamp (not ID)
+	// This handles the fact that general comments and review comments have different ID spaces
+	var newFeedback []string
+	var latestTime time.Time
+	for _, c := range allComments {
+		if c.CreatedAt.After(st.LastPRCommentTime) && !state.IsBotComment(c.Body) {
+			newFeedback = append(newFeedback, c.Body)
+			if c.CreatedAt.After(latestTime) {
+				latestTime = c.CreatedAt
+			}
+		}
+	}
+
+	if len(newFeedback) > 0 {
+		o.logger.Printf("Processing %d PR feedback comment(s)...", len(newFeedback))
+
+		// Combine all feedback into one prompt
+		combinedFeedback := strings.Join(newFeedback, "\n\n---\n\n")
+
+		// Address the feedback - Claude fixes code AND handles git operations
+		if err := o.implPhase.AddressFeedback(ctx, combinedFeedback, sb, st.BranchName); err != nil {
+			return false, err
+		}
+
+		// Update state BEFORE posting acknowledgment
+		st.LastPRCommentTime = latestTime
+
+		// Post acknowledgment on the issue with updated state
+		ackMsg := state.AddBotMarker("Addressed PR feedback and pushed changes.")
+		msgWithState, _ := st.AppendToBody(ackMsg)
+		o.provider.CreateComment(ctx, repo, issue.Number, msgWithState)
+
+		// Return immediately to wait for CI to run on the new commit
+		return true, nil
 	}
 
 	// Check if mergeable
@@ -629,4 +685,3 @@ func (o *Orchestrator) CheckAndUnblockIssues(ctx context.Context, repo string, c
 
 	return readyIssues, nil
 }
-
