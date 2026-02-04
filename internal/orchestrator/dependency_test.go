@@ -169,10 +169,10 @@ func TestDeduplicateDeps(t *testing.T) {
 	detector := NewDependencyDetector(nil, nil, "auto")
 
 	tests := []struct {
-		name       string
-		deps       []int
-		selfIssue  int
-		expected   []int
+		name      string
+		deps      []int
+		selfIssue int
+		expected  []int
 	}{
 		{
 			name:      "remove duplicates",

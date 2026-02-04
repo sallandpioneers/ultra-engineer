@@ -40,9 +40,9 @@ type WorkerPool struct {
 
 	// Concurrency limiting (protected by mu)
 	mu          sync.Mutex
-	activeJobs  map[string]int       // repoKey -> count of active jobs
-	totalActive int                  // Total count of active jobs across all repos
-	accepting   bool                 // Whether pool is accepting new jobs
+	activeJobs  map[string]int // repoKey -> count of active jobs
+	totalActive int            // Total count of active jobs across all repos
+	accepting   bool           // Whether pool is accepting new jobs
 
 	// State tracking for graceful shutdown (protected by mu)
 	activeStates map[string]*state.State // jobID -> current state for persistence

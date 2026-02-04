@@ -58,9 +58,9 @@ type DefaultsConfig struct {
 
 // ConcurrencyConfig controls concurrent issue processing
 type ConcurrencyConfig struct {
-	MaxPerRepo          int    `yaml:"max_per_repo"`          // Maximum concurrent issues per repository (default: 1)
-	MaxTotal            int    `yaml:"max_total"`             // Maximum total concurrent issues (default: 5)
-	DependencyDetection string `yaml:"dependency_detection"`  // "auto" | "manual" | "disabled" (default: "auto")
+	MaxPerRepo          int    `yaml:"max_per_repo"`         // Maximum concurrent issues per repository (default: 1)
+	MaxTotal            int    `yaml:"max_total"`            // Maximum total concurrent issues (default: 5)
+	DependencyDetection string `yaml:"dependency_detection"` // "auto" | "manual" | "disabled" (default: "auto")
 }
 
 // ProgressConfig controls progress reporting
