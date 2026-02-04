@@ -270,7 +270,7 @@ Currently, prompts are hardcoded in `internal/claude/prompts.go`. To customize, 
 
 If you can't resolve an issue:
 
-1. Check existing [GitHub Issues](https://github.com/sallandpioneers/ultra-engineer/issues)
+1. Check existing [GitHub Issues](https://github.com/anthropics/ultra-engineer/issues)
 2. Enable verbose logging and collect logs
 3. Open a new issue with:
    - Ultra Engineer version

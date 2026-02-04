@@ -14,7 +14,7 @@ Thank you for your interest in contributing to Ultra Engineer! This guide will h
 ### Clone and Build
 
 ```bash
-git clone https://github.com/sallandpioneers/ultra-engineer.git
+git clone https://github.com/anthropics/ultra-engineer.git
 cd ultra-engineer
 make build
 ```

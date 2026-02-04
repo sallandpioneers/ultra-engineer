@@ -83,7 +83,7 @@ State is stored as JSON in HTML comments within the issue body:
 -->
 ```
 
-Key state fields: `SessionID`, `CurrentPhase`, `QAHistory`, `QARound`, `PlanVersion`, `ReviewIteration`, `PRNumber`, `BranchName`, `DependsOn`, `BlockedBy`, `CIFixAttempts`, `LastCIStatus`.
+Key state fields: `SessionID`, `CurrentPhase`, `QAHistory`, `QARound`, `PlanVersion`, `ReviewIteration`, `PRNumber`, `BranchName`, `LastCommentTime`, `DependsOn`, `BlockedBy`, `CIFixAttempts`, `LastCIStatus`.
 
 ### Provider Interface
 
