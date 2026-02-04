@@ -12,6 +12,7 @@ import (
 	"github.com/anthropics/ultra-engineer/internal/progress"
 	"github.com/anthropics/ultra-engineer/internal/providers"
 	"github.com/anthropics/ultra-engineer/internal/sandbox"
+	"github.com/anthropics/ultra-engineer/internal/security"
 	"github.com/anthropics/ultra-engineer/internal/state"
 	"github.com/anthropics/ultra-engineer/internal/workflow"
 )
@@ -228,6 +229,13 @@ func (o *Orchestrator) handleQuestions(ctx context.Context, repo string, issue *
 		return true, nil // Wait for user
 	}
 
+	// Check if the comment author is authorized
+	authorized, _ := security.IsAuthorized(ctx, o.provider, repo, answer.Author, o.logger)
+	if !authorized {
+		// Skip unauthorized comments silently (already logged by IsAuthorized)
+		return true, nil // Wait for authorized user
+	}
+
 	// React to acknowledge we've read the comment
 	o.provider.ReactToComment(ctx, repo, answer.ID, "+1")
 
@@ -290,6 +298,13 @@ func (o *Orchestrator) handleApproval(ctx context.Context, repo string, issue *p
 
 	if response == nil {
 		return true, nil // Wait for user
+	}
+
+	// Check if the comment author is authorized
+	authorized, _ := security.IsAuthorized(ctx, o.provider, repo, response.Author, o.logger)
+	if !authorized {
+		// Skip unauthorized comments silently (already logged by IsAuthorized)
+		return true, nil // Wait for authorized user
 	}
 
 	// React to acknowledge we've read the comment
@@ -429,6 +444,12 @@ func (o *Orchestrator) handleReview(ctx context.Context, repo string, issue *pro
 	var latestTime time.Time
 	for _, c := range allComments {
 		if c.CreatedAt.After(st.LastPRCommentTime) && !state.IsBotComment(c.Body) {
+			// Check authorization before including feedback
+			authorized, _ := security.IsAuthorized(ctx, o.provider, repo, c.Author, o.logger)
+			if !authorized {
+				// Skip unauthorized feedback (already logged by IsAuthorized)
+				continue
+			}
 			newFeedback = append(newFeedback, c.Body)
 			if c.CreatedAt.After(latestTime) {
 				latestTime = c.CreatedAt
@@ -681,6 +702,13 @@ func (o *Orchestrator) CheckForRetry(ctx context.Context, repo string, issue *pr
 		if c.CreatedAt.After(st.LastCommentTime) && !state.IsBotComment(c.Body) {
 			body := strings.TrimSpace(strings.ToLower(c.Body))
 			if body == "/retry" || strings.HasPrefix(body, "/retry ") {
+				// Check if the comment author is authorized
+				authorized, _ := security.IsAuthorized(ctx, o.provider, repo, c.Author, o.logger)
+				if !authorized {
+					// Skip unauthorized retry commands (already logged by IsAuthorized)
+					continue
+				}
+
 				// Found retry command - reset state for retry
 				o.logger.Printf("Retry requested for issue #%d", issue.Number)
 
