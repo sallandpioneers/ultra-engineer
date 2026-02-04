@@ -42,6 +42,11 @@ type State struct {
 	LastUpdated     time.Time        `json:"last_updated"`
 	LastCommentID   int64            `json:"last_comment_id,omitempty"`
 	Error           string           `json:"error,omitempty"`
+
+	// Dependency tracking for concurrent issue processing
+	DependsOn     []int  `json:"depends_on,omitempty"`     // Issue numbers this issue depends on
+	BlockedBy     []int  `json:"blocked_by,omitempty"`     // Currently blocking issue numbers
+	FailureReason string `json:"failure_reason,omitempty"` // "merge_conflict", "dependency_cycle", "dependency_failed", etc.
 }
 
 const (

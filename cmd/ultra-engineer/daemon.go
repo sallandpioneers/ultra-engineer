@@ -15,7 +15,7 @@ import (
 )
 
 func daemonCmd() *cobra.Command {
-	var repo string
+	var repos []string
 
 	cmd := &cobra.Command{
 		Use:   "daemon",
@@ -23,24 +23,27 @@ func daemonCmd() *cobra.Command {
 		Long: `Run Ultra Engineer as a daemon that continuously polls for issues
 with the trigger label and processes them automatically.
 
+Supports monitoring multiple repositories concurrently.
+
 Example:
-  ultra-engineer daemon --repo owner/repo`,
+  ultra-engineer daemon --repo owner/repo
+  ultra-engineer daemon --repo owner/repo1 --repo owner/repo2`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if repo == "" {
-				return fmt.Errorf("--repo is required")
+			if len(repos) == 0 {
+				return fmt.Errorf("--repo is required (can be specified multiple times)")
 			}
 
-			return runDaemon(repo)
+			return runDaemon(repos)
 		},
 	}
 
-	cmd.Flags().StringVar(&repo, "repo", "", "Repository to monitor (owner/repo)")
+	cmd.Flags().StringArrayVar(&repos, "repo", nil, "Repository to monitor (owner/repo), can be specified multiple times")
 	cmd.MarkFlagRequired("repo")
 
 	return cmd
 }
 
-func runDaemon(repo string) error {
+func runDaemon(repos []string) error {
 	// Load config
 	cfg, err := config.Load(configPath)
 	if err != nil {
@@ -87,7 +90,7 @@ func runDaemon(repo string) error {
 	}()
 
 	// Run daemon
-	return daemon.Run(ctx, repo)
+	return daemon.Run(ctx, repos)
 }
 
 func createProvider(cfg *config.Config) (providers.Provider, error) {

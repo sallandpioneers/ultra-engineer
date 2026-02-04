@@ -7,11 +7,12 @@ import (
 
 // Prompts contains all the prompt templates used by the orchestrator
 var Prompts = struct {
-	AnalyzeIssue string
-	ReviewPlan   string
-	ReviewCode   string
-	Implement    string
-	FixCI        string
+	AnalyzeIssue  string
+	ReviewPlan    string
+	ReviewCode    string
+	Implement     string
+	ImplementGit  string // Implementation with git commit/push instructions
+	FixCI         string
 }{
 	AnalyzeIssue: `Analyze this issue and decide if you need clarifying questions.
 
@@ -55,6 +56,36 @@ Then write your implementation plan to .ultra-engineer/plan.md with:
 	ReviewCode: `/review the code and fix all issues`,
 
 	Implement: `Implement the plan from .ultra-engineer/plan.md`,
+
+	ImplementGit: `Implement the plan from .ultra-engineer/plan.md
+
+Issue: %s
+Branch: %s
+
+After implementing the code changes:
+
+1. **Stage and commit** your changes:
+   - git add <specific files you changed>
+   - git commit -m "Implement: %s
+
+Closes #%d"
+
+2. **Handle merge conflicts** before pushing:
+   - git fetch origin main
+   - git rebase origin/main
+   - If conflicts occur:
+     a. Resolve them using your understanding of the code context
+     b. git add <resolved files>
+     c. git rebase --continue
+   - If you cannot resolve a conflict, output:
+     MERGE_CONFLICT_UNRESOLVED: <comma-separated list of conflicting files>
+
+3. **Push the branch**:
+   - git push -u origin %s
+
+If push fails due to remote changes, fetch and rebase again, then retry push.
+
+Output "IMPLEMENTATION_COMPLETE" when all code is implemented, committed, and pushed successfully.`,
 
 	FixCI: `CI failed. Fix the issues.
 
