@@ -26,10 +26,6 @@ type Daemon struct {
 	allStates    map[string]map[int]*state.State // repo -> issueNum -> state
 	allStatesMu  sync.RWMutex
 	claudeClient *claude.Client
-
-	// Legacy single-issue tracking (for RunOnce)
-	currentRepo  string
-	currentIssue int
 }
 
 // NewDaemon creates a new daemon

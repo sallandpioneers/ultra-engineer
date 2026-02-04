@@ -152,11 +152,7 @@ func (d *DependencyDetector) hasNoDepsOverride(issue *providers.Issue) bool {
 	}
 
 	// Check for /no-deps comment (this would need to be checked via comments)
-	if strings.Contains(issue.Body, "/no-deps") {
-		return true
-	}
-
-	return false
+	return strings.Contains(issue.Body, "/no-deps")
 }
 
 // deduplicateDeps removes duplicates and self-references from deps

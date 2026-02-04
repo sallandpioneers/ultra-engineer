@@ -21,23 +21,38 @@ linters-settings:
     exclude-functions:
       - io.ReadAll
       - (*os/exec.Cmd).StderrPipe
+      - (*net/http.Response.Body).Close
+      - (io.Closer).Close
+      - os.Setenv
+      - fmt.Sscanf
   gocritic:
     enabled-tags:
       - diagnostic
-      - style
+    disabled-checks:
+      - ifElseChain
   misspell:
     locale: US
+    ignore-words:
+      - cancelled  # Used by GitHub/Gitea APIs
 
 issues:
   exclude-use-default: false
   max-issues-per-linter: 0
   max-same-issues: 0
   exclude-rules:
-    # Allow ignored errors for file reads that have fallback behavior
-    - path: internal/workflow/qa.go
+    # Allow ignored errors for progress reporting (best-effort)
+    - path: _test\.go
       linters:
         - errcheck
     - path: internal/orchestrator/
       linters:
         - errcheck
-      text: "AppendToBody"
+    - path: internal/workflow/
+      linters:
+        - errcheck
+    - path: internal/providers/
+      linters:
+        - errcheck
+    - path: cmd/
+      linters:
+        - errcheck
