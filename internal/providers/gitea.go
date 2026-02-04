@@ -208,9 +208,23 @@ func (g *GiteaProvider) GetComments(ctx context.Context, repo string, number int
 	return result, nil
 }
 
-func (g *GiteaProvider) CreateComment(ctx context.Context, repo string, number int, body string) error {
+func (g *GiteaProvider) CreateComment(ctx context.Context, repo string, number int, body string) (int64, error) {
 	path := fmt.Sprintf("/repos/%s/issues/%d/comments", repo, number)
-	_, err := g.doRequest(ctx, "POST", path, map[string]string{"body": body})
+	data, err := g.doRequest(ctx, "POST", path, map[string]string{"body": body})
+	if err != nil {
+		return 0, err
+	}
+
+	var comment giteaComment
+	if err := json.Unmarshal(data, &comment); err != nil {
+		return 0, fmt.Errorf("failed to parse comment response: %w", err)
+	}
+	return comment.ID, nil
+}
+
+func (g *GiteaProvider) UpdateComment(ctx context.Context, repo string, commentID int64, body string) error {
+	path := fmt.Sprintf("/repos/%s/issues/comments/%d", repo, commentID)
+	_, err := g.doRequest(ctx, "PATCH", path, map[string]string{"body": body})
 	return err
 }
 

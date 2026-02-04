@@ -53,7 +53,8 @@ type Provider interface {
 	GetIssue(ctx context.Context, repo string, number int) (*Issue, error)
 	ListIssuesWithLabel(ctx context.Context, repo string, label string) ([]*Issue, error)
 	GetComments(ctx context.Context, repo string, number int) ([]*Comment, error)
-	CreateComment(ctx context.Context, repo string, number int, body string) error
+	CreateComment(ctx context.Context, repo string, number int, body string) (int64, error)
+	UpdateComment(ctx context.Context, repo string, commentID int64, body string) error
 	UpdateIssueBody(ctx context.Context, repo string, number int, body string) error
 	ReactToComment(ctx context.Context, repo string, commentID int64, reaction string) error
 

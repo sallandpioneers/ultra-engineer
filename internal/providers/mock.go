@@ -20,6 +20,7 @@ type MockProvider struct {
 
 	// Tracking calls for assertions
 	CreatedComments []MockComment
+	UpdatedComments []MockCommentUpdate
 	AddedLabels     []MockLabel
 	RemovedLabels   []MockLabel
 	Reactions       []MockReaction
@@ -32,10 +33,18 @@ type MockProvider struct {
 
 // MockComment tracks created comments
 type MockComment struct {
+	ID        int64
 	Repo      string
 	IssueNum  int
 	Body      string
 	CreatedAt time.Time
+}
+
+// MockCommentUpdate tracks comment updates
+type MockCommentUpdate struct {
+	Repo      string
+	CommentID int64
+	Body      string
 }
 
 // MockLabel tracks label operations
@@ -119,7 +128,7 @@ func (m *MockProvider) GetComments(ctx context.Context, repo string, number int)
 }
 
 // CreateComment implements Provider
-func (m *MockProvider) CreateComment(ctx context.Context, repo string, number int, body string) error {
+func (m *MockProvider) CreateComment(ctx context.Context, repo string, number int, body string) (int64, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -127,8 +136,9 @@ func (m *MockProvider) CreateComment(ctx context.Context, repo string, number in
 		m.Comments[repo] = make(map[int][]*Comment)
 	}
 
+	commentID := int64(len(m.CreatedComments) + 1)
 	comment := &Comment{
-		ID:        int64(len(m.CreatedComments) + 1),
+		ID:        commentID,
 		Body:      body,
 		Author:    "ultra-engineer[bot]",
 		CreatedAt: time.Now(),
@@ -136,10 +146,35 @@ func (m *MockProvider) CreateComment(ctx context.Context, repo string, number in
 
 	m.Comments[repo][number] = append(m.Comments[repo][number], comment)
 	m.CreatedComments = append(m.CreatedComments, MockComment{
+		ID:        commentID,
 		Repo:      repo,
 		IssueNum:  number,
 		Body:      body,
 		CreatedAt: comment.CreatedAt,
+	})
+
+	return commentID, nil
+}
+
+// UpdateComment implements Provider
+func (m *MockProvider) UpdateComment(ctx context.Context, repo string, commentID int64, body string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// Update the comment in storage
+	for _, issueComments := range m.Comments[repo] {
+		for _, comment := range issueComments {
+			if comment.ID == commentID {
+				comment.Body = body
+				break
+			}
+		}
+	}
+
+	m.UpdatedComments = append(m.UpdatedComments, MockCommentUpdate{
+		Repo:      repo,
+		CommentID: commentID,
+		Body:      body,
 	})
 
 	return nil
@@ -345,6 +380,7 @@ func (m *MockProvider) Reset() {
 	m.Comments = make(map[string]map[int][]*Comment)
 	m.PRs = make(map[string]map[int]*PR)
 	m.CreatedComments = nil
+	m.UpdatedComments = nil
 	m.AddedLabels = nil
 	m.RemovedLabels = nil
 	m.Reactions = nil
