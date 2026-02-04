@@ -19,6 +19,9 @@ type MockProvider struct {
 	PRs              map[string]map[int]*PR        // repo -> prNum -> pr
 	PRReviewComments map[string]map[int][]*Comment // repo -> prNum -> review comments
 
+	// Authorization storage
+	Collaborators map[string]map[string]bool // repo -> username -> isCollaborator
+
 	// Tracking calls for assertions
 	CreatedComments []MockComment
 	UpdatedComments []MockCommentUpdate
@@ -69,6 +72,7 @@ func NewMockProvider() *MockProvider {
 		Comments:         make(map[string]map[int][]*Comment),
 		PRs:              make(map[string]map[int]*PR),
 		PRReviewComments: make(map[string]map[int][]*Comment),
+		Collaborators:    make(map[string]map[string]bool),
 		DefaultBranch:    "main",
 	}
 }
@@ -372,6 +376,30 @@ func (m *MockProvider) Name() string {
 	return "mock"
 }
 
+// IsCollaborator implements Provider
+func (m *MockProvider) IsCollaborator(ctx context.Context, repo, username string) (bool, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	if repoCollaborators, ok := m.Collaborators[repo]; ok {
+		if isCollab, ok := repoCollaborators[username]; ok {
+			return isCollab, nil
+		}
+	}
+	return false, nil
+}
+
+// SetCollaborator sets the collaborator status for a user (for testing)
+func (m *MockProvider) SetCollaborator(repo, username string, isCollaborator bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.Collaborators[repo] == nil {
+		m.Collaborators[repo] = make(map[string]bool)
+	}
+	m.Collaborators[repo][username] = isCollaborator
+}
+
 // Helper methods for testing
 
 // AddComment adds a comment to an issue (simulating user comment)
@@ -406,6 +434,7 @@ func (m *MockProvider) Reset() {
 	m.Comments = make(map[string]map[int][]*Comment)
 	m.PRs = make(map[string]map[int]*PR)
 	m.PRReviewComments = make(map[string]map[int][]*Comment)
+	m.Collaborators = make(map[string]map[string]bool)
 	m.CreatedComments = nil
 	m.UpdatedComments = nil
 	m.AddedLabels = nil

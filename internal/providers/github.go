@@ -501,6 +501,40 @@ func (g *GitHubProvider) GetCIStatus(ctx context.Context, repo string, prNumber 
 	return result, nil
 }
 
+// IsCollaborator checks if a user is a collaborator on the repository
+func (g *GitHubProvider) IsCollaborator(ctx context.Context, repo, username string) (bool, error) {
+	// Use gh api to check collaborator permission
+	// Endpoint: repos/{owner}/{repo}/collaborators/{username}/permission
+	endpoint := fmt.Sprintf("repos/%s/collaborators/%s/permission", repo, username)
+	out, err := g.runGH(ctx, "api", endpoint)
+	if err != nil {
+		// GitHub returns 404 for users who are not collaborators at all
+		if strings.Contains(err.Error(), "404") {
+			return false, nil
+		}
+		// For other errors (network, auth, etc.), fail closed
+		return false, err
+	}
+
+	// Parse the permission response
+	type permissionResponse struct {
+		Permission string `json:"permission"`
+	}
+	var resp permissionResponse
+	if err := json.Unmarshal(out, &resp); err != nil {
+		return false, fmt.Errorf("failed to parse permission response: %w", err)
+	}
+
+	// Consider user authorized if they have admin, maintain, write, or triage permissions
+	// Users with only "read" permission should NOT be authorized
+	switch resp.Permission {
+	case "admin", "maintain", "write", "triage":
+		return true, nil
+	default:
+		return false, nil
+	}
+}
+
 // GetCILogs retrieves logs for a GitHub Actions workflow run
 func (g *GitHubProvider) GetCILogs(ctx context.Context, repo string, checkRunID int64) (string, error) {
 	// Use gh api to fetch the check run details with output

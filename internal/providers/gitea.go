@@ -685,6 +685,49 @@ func (g *GiteaProvider) enrichWithActionRuns(ctx context.Context, repo, branch s
 	}
 }
 
+// IsCollaborator checks if a user is a collaborator on the repository
+func (g *GiteaProvider) IsCollaborator(ctx context.Context, repo, username string) (bool, error) {
+	// If retry is configured, use retry logic
+	if g.retryOpts != nil {
+		return retry.DoWithResult(ctx, *g.retryOpts, func() (bool, error) {
+			return g.checkCollaboratorOnce(ctx, repo, username)
+		})
+	}
+	return g.checkCollaboratorOnce(ctx, repo, username)
+}
+
+// checkCollaboratorOnce checks collaborator status with custom 200/404 handling
+func (g *GiteaProvider) checkCollaboratorOnce(ctx context.Context, repo, username string) (bool, error) {
+	url := g.baseURL + "/api/v1/repos/" + repo + "/collaborators/" + username
+
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return false, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("Authorization", "token "+g.token)
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := g.client.Do(req)
+	if err != nil {
+		return false, fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	switch resp.StatusCode {
+	case http.StatusOK, http.StatusNoContent:
+		// 200/204 = user IS a collaborator
+		return true, nil
+	case http.StatusNotFound:
+		// 404 = user is NOT a collaborator (expected, not an error)
+		return false, nil
+	default:
+		// Other errors (403, 500, etc.) - return error
+		body, _ := io.ReadAll(resp.Body)
+		return false, fmt.Errorf("API error %d: %s", resp.StatusCode, string(body))
+	}
+}
+
 // GetCILogs retrieves logs for a Gitea CI run
 func (g *GiteaProvider) GetCILogs(ctx context.Context, repo string, checkRunID int64) (string, error) {
 	// Try Gitea Actions logs first

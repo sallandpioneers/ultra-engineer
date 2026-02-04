@@ -74,6 +74,9 @@ type Provider interface {
 	Clone(ctx context.Context, repo string, dest string) error
 	GetDefaultBranch(ctx context.Context, repo string) (string, error)
 
+	// Authorization
+	IsCollaborator(ctx context.Context, repo, username string) (bool, error)
+
 	// Provider info
 	Name() string
 }
