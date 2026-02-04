@@ -238,3 +238,146 @@ func TestDoWithResult_RetryThenSuccess(t *testing.T) {
 		t.Errorf("expected 3 calls, got %d", calls)
 	}
 }
+
+func TestDo_InfiniteRetry_StopsOnPermanent(t *testing.T) {
+	ctx := context.Background()
+	opts := Options{
+		MaxAttempts:    0, // infinite
+		BackoffBase:    1 * time.Millisecond,
+		RateLimitRetry: 5 * time.Millisecond,
+		Classifier: func(err error) ErrorType {
+			if err.Error() == "permanent" {
+				return Permanent
+			}
+			return Retryable
+		},
+	}
+
+	calls := 0
+	err := Do(ctx, opts, func() error {
+		calls++
+		if calls < 3 {
+			return errors.New("transient")
+		}
+		return errors.New("permanent")
+	})
+
+	if err == nil || err.Error() != "permanent" {
+		t.Errorf("expected permanent error, got %v", err)
+	}
+	if calls != 3 {
+		t.Errorf("expected 3 calls (2 transient + 1 permanent), got %d", calls)
+	}
+}
+
+func TestDo_InfiniteRetry_RespectsContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	opts := Options{
+		MaxAttempts:    0, // infinite
+		BackoffBase:    1 * time.Millisecond,
+		RateLimitRetry: 5 * time.Millisecond,
+		Classifier:     func(err error) ErrorType { return Retryable },
+	}
+
+	calls := 0
+	go func() {
+		// Cancel after a short delay to allow some retries
+		time.Sleep(10 * time.Millisecond)
+		cancel()
+	}()
+
+	err := Do(ctx, opts, func() error {
+		calls++
+		return errors.New("keep retrying")
+	})
+
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("expected context.Canceled, got %v", err)
+	}
+	if calls < 1 {
+		t.Errorf("expected at least 1 call, got %d", calls)
+	}
+}
+
+func TestDo_InfiniteRetry_EventualSuccess(t *testing.T) {
+	ctx := context.Background()
+	opts := Options{
+		MaxAttempts:    0, // infinite
+		BackoffBase:    1 * time.Millisecond,
+		RateLimitRetry: 5 * time.Millisecond,
+		Classifier:     func(err error) ErrorType { return Retryable },
+	}
+
+	calls := 0
+	err := Do(ctx, opts, func() error {
+		calls++
+		if calls < 5 {
+			return errors.New("transient")
+		}
+		return nil // success on 5th attempt
+	})
+
+	if err != nil {
+		t.Errorf("expected no error, got %v", err)
+	}
+	if calls != 5 {
+		t.Errorf("expected 5 calls, got %d", calls)
+	}
+}
+
+func TestDoWithResult_InfiniteRetry(t *testing.T) {
+	ctx := context.Background()
+	opts := Options{
+		MaxAttempts:    0, // infinite
+		BackoffBase:    1 * time.Millisecond,
+		RateLimitRetry: 5 * time.Millisecond,
+		Classifier:     func(err error) ErrorType { return Retryable },
+	}
+
+	calls := 0
+	result, err := DoWithResult(ctx, opts, func() (int, error) {
+		calls++
+		if calls < 4 {
+			return 0, errors.New("transient")
+		}
+		return 42, nil
+	})
+
+	if err != nil {
+		t.Errorf("expected no error, got %v", err)
+	}
+	if result != 42 {
+		t.Errorf("expected 42, got %d", result)
+	}
+	if calls != 4 {
+		t.Errorf("expected 4 calls, got %d", calls)
+	}
+}
+
+func TestDo_InfiniteRetry_NegativeMaxAttempts(t *testing.T) {
+	ctx := context.Background()
+	opts := Options{
+		MaxAttempts:    -1, // negative also means infinite
+		BackoffBase:    1 * time.Millisecond,
+		RateLimitRetry: 5 * time.Millisecond,
+		Classifier:     func(err error) ErrorType { return Retryable },
+	}
+
+	calls := 0
+	err := Do(ctx, opts, func() error {
+		calls++
+		if calls < 3 {
+			return errors.New("transient")
+		}
+		return nil
+	})
+
+	if err != nil {
+		t.Errorf("expected no error, got %v", err)
+	}
+	if calls != 3 {
+		t.Errorf("expected 3 calls, got %d", calls)
+	}
+}

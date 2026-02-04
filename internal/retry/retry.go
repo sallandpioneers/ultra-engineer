@@ -63,11 +63,16 @@ func calculateBackoff(base time.Duration, attempt int) time.Duration {
 }
 
 // Do executes a function with retry logic
-// The function is retried based on error classification until max attempts or permanent error
+// When MaxAttempts <= 0, retries indefinitely (infinite mode)
+// The function is retried based on error classification until:
+// - Success
+// - Context cancellation
+// - Permanent error (always stops retries, even in infinite mode)
 func Do(ctx context.Context, opts Options, fn func() error) error {
 	var lastErr error
+	infinite := opts.MaxAttempts <= 0
 
-	for attempt := 0; attempt < opts.MaxAttempts; attempt++ {
+	for attempt := 0; infinite || attempt < opts.MaxAttempts; attempt++ {
 		// Check context before each attempt
 		if err := ctx.Err(); err != nil {
 			return err
@@ -93,8 +98,8 @@ func Do(ctx context.Context, opts Options, fn func() error) error {
 				return err
 			}
 		case Retryable:
-			// Use exponential backoff
-			if attempt < opts.MaxAttempts-1 {
+			// Use exponential backoff (skip delay on last attempt in finite mode)
+			if infinite || attempt < opts.MaxAttempts-1 {
 				backoff := calculateBackoff(opts.BackoffBase, attempt)
 				if err := sleep(ctx, backoff); err != nil {
 					return err
@@ -107,11 +112,13 @@ func Do(ctx context.Context, opts Options, fn func() error) error {
 }
 
 // DoWithResult executes a function that returns a value with retry logic
+// When MaxAttempts <= 0, retries indefinitely (infinite mode)
 func DoWithResult[T any](ctx context.Context, opts Options, fn func() (T, error)) (T, error) {
 	var result T
 	var lastErr error
+	infinite := opts.MaxAttempts <= 0
 
-	for attempt := 0; attempt < opts.MaxAttempts; attempt++ {
+	for attempt := 0; infinite || attempt < opts.MaxAttempts; attempt++ {
 		// Check context before each attempt
 		if err := ctx.Err(); err != nil {
 			return result, err
@@ -137,8 +144,8 @@ func DoWithResult[T any](ctx context.Context, opts Options, fn func() (T, error)
 				return result, err
 			}
 		case Retryable:
-			// Use exponential backoff
-			if attempt < opts.MaxAttempts-1 {
+			// Use exponential backoff (skip delay on last attempt in finite mode)
+			if infinite || attempt < opts.MaxAttempts-1 {
 				backoff := calculateBackoff(opts.BackoffBase, attempt)
 				if err := sleep(ctx, backoff); err != nil {
 					return result, err
