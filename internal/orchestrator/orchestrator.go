@@ -205,10 +205,11 @@ func (o *Orchestrator) handleQuestions(ctx context.Context, repo string, issue *
 	}
 
 	// Find latest user answer (skip bot comments)
+	// Use timestamp comparison since GitHub GraphQL node IDs don't map to stable integers
 	var answer *providers.Comment
 	for i := len(comments) - 1; i >= 0; i-- {
 		c := comments[i]
-		if c.ID > st.LastCommentID && !state.IsBotComment(c.Body) {
+		if c.CreatedAt.After(st.LastCommentTime) && !state.IsBotComment(c.Body) {
 			answer = c
 			break
 		}
@@ -225,7 +226,7 @@ func (o *Orchestrator) handleQuestions(ctx context.Context, repo string, issue *
 		return false, fmt.Errorf("user aborted")
 	}
 
-	st.LastCommentID = answer.ID
+	st.LastCommentTime = answer.CreatedAt
 	// Move to planning (simplified - skip follow-up questions for now)
 	st.SetPhase(state.PhasePlanning)
 	o.setLabel(ctx, repo, issue.Number, state.PhasePlanning)
@@ -268,10 +269,11 @@ func (o *Orchestrator) handleApproval(ctx context.Context, repo string, issue *p
 	}
 
 	// Find latest user response (skip bot comments)
+	// Use timestamp comparison since GitHub GraphQL node IDs don't map to stable integers
 	var response *providers.Comment
 	for i := len(comments) - 1; i >= 0; i-- {
 		c := comments[i]
-		if c.ID > st.LastCommentID && !state.IsBotComment(c.Body) {
+		if c.CreatedAt.After(st.LastCommentTime) && !state.IsBotComment(c.Body) {
 			response = c
 			break
 		}
@@ -284,7 +286,7 @@ func (o *Orchestrator) handleApproval(ctx context.Context, repo string, issue *p
 	// React to acknowledge we've read the comment
 	o.provider.ReactToComment(ctx, repo, response.ID, "+1")
 
-	st.LastCommentID = response.ID
+	st.LastCommentTime = response.CreatedAt
 
 	if workflow.IsAbort(response.Body) {
 		return false, fmt.Errorf("user aborted")
@@ -674,7 +676,7 @@ func (o *Orchestrator) CheckForRetry(ctx context.Context, repo string, issue *pr
 
 	for i := len(comments) - 1; i >= 0; i-- {
 		c := comments[i]
-		if c.ID > st.LastCommentID && !state.IsBotComment(c.Body) {
+		if c.CreatedAt.After(st.LastCommentTime) && !state.IsBotComment(c.Body) {
 			body := strings.TrimSpace(strings.ToLower(c.Body))
 			if body == "/retry" || strings.HasPrefix(body, "/retry ") {
 				// Found retry command - reset state for retry
@@ -683,7 +685,7 @@ func (o *Orchestrator) CheckForRetry(ctx context.Context, repo string, issue *pr
 				st.FailureReason = ""
 				st.Error = ""
 				st.SetPhase(state.PhaseImplementing)
-				st.LastCommentID = c.ID
+				st.LastCommentTime = c.CreatedAt
 
 				// Update labels
 				o.provider.RemoveLabel(ctx, repo, issue.Number, NeedsManualResolutionLabel)

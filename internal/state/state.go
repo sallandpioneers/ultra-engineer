@@ -40,7 +40,8 @@ type State struct {
 	PRNumber        int              `json:"pr_number,omitempty"`
 	BranchName      string           `json:"branch_name,omitempty"`
 	LastUpdated     time.Time        `json:"last_updated"`
-	LastCommentID   int64            `json:"last_comment_id,omitempty"`
+	LastCommentID   int64            `json:"last_comment_id,omitempty"`   // Deprecated: use LastCommentTime
+	LastCommentTime time.Time        `json:"last_comment_time,omitempty"` // Timestamp of last processed comment
 	Error           string           `json:"error,omitempty"`
 
 	// PR comment tracking - uses timestamp for ordering since PR comments and review
