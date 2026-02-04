@@ -3,16 +3,22 @@ run:
 
 linters:
   enable:
+    # Bugs
     - errcheck      # Check for unchecked errors
     - gosimple      # Simplify code
     - govet         # Go vet checks
     - ineffassign   # Detect ineffectual assignments
     - staticcheck   # Static analysis
     - unused        # Find unused code
+    # Security
+    - gosec         # Security issues
+    # Style
     - gofmt         # Check formatting
     - goimports     # Check imports
     - misspell      # Find misspellings
     - gocritic      # Opinionated linter
+    # Maintainability
+    - nolintlint    # Require nolint justification
 
 linters-settings:
   errcheck:
@@ -33,6 +39,19 @@ linters-settings:
     locale: US
     ignore-words:
       - cancelled  # Used by GitHub/Gitea APIs
+  gosec:
+    excludes:
+      - G104  # Unhandled errors (covered by errcheck)
+      - G204  # Subprocess with variable args (we run git/claude)
+      - G301  # Dir permissions 0750 (0755 fine for sandboxes)
+      - G302  # File permissions 0600 (0644 fine for logs)
+      - G304  # File path from variable (necessary)
+      - G306  # WriteFile permissions (0644 fine)
+      - G404  # Weak random (jitter doesn't need crypto)
+      - G115  # Integer overflow (intentional in hash)
+  nolintlint:
+    require-explanation: true
+    require-specific: true
 
 issues:
   exclude-use-default: false

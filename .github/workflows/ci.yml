@@ -27,6 +27,10 @@ jobs:
           go-version: 'stable'
           cache: true
       - run: go build ./...
+      - name: Check go mod tidy
+        run: |
+          go mod tidy
+          git diff --exit-code go.mod go.sum
 
   test:
     runs-on: ubuntu-latest
@@ -37,4 +41,28 @@ jobs:
           go-version: 'stable'
           cache: true
       - run: go test -race -coverprofile=coverage.out ./...
-      - run: go tool cover -func=coverage.out | tail -1
+      - name: Check coverage
+        run: |
+          COVERAGE=$(go tool cover -func=coverage.out | grep total | awk '{print $3}' | tr -d '%')
+          echo "Coverage: ${COVERAGE}%"
+          if (( $(echo "$COVERAGE < 10" | bc -l) )); then
+            echo "::error::Coverage ${COVERAGE}% is below 10% threshold"
+            exit 1
+          fi
+
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 'stable'
+          cache: true
+      - name: Run govulncheck
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...
+      - name: Check for secrets
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
