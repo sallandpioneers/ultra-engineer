@@ -79,9 +79,17 @@ func (p *PlanningPhase) IntegrateFeedback(ctx context.Context, feedback string, 
 	feedbackPath := filepath.Join(workDir, ".ultra-engineer", "feedback.md")
 	os.WriteFile(feedbackPath, []byte(feedback), 0644)
 
-	prompt := `Read the feedback at .ultra-engineer/feedback.md and update .ultra-engineer/plan.md accordingly.
-If changes are significant (new requirements, architectural changes), output "SIGNIFICANT_CHANGES".
-If changes are minor, output "MINOR_CHANGES".`
+	prompt := `Read the user feedback at .ultra-engineer/feedback.md. This feedback is a CHANGE REQUEST - the user wants you to modify the plan, not explain or justify the current approach.
+
+Revise .ultra-engineer/plan.md to incorporate the user's requested changes:
+- If they ask "can X do Y?" or "why not X?" - they're requesting you change the approach to use X
+- If they disagree with a decision - change the plan to use their preferred approach
+- If they suggest additions - add them to the plan
+- Do NOT add explanatory sections defending the current approach
+
+After updating the plan, output:
+- "SIGNIFICANT_CHANGES" if the changes affect architecture, approach, or requirements
+- "MINOR_CHANGES" if the changes are clarifications or small additions`
 
 	result, _, err := p.claude.RunInteractive(ctx, claude.RunOptions{
 		WorkDir:      workDir,
