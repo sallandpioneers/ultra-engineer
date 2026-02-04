@@ -1,0 +1,22 @@
+#!/bin/bash
+# Pre-push hook: run CI checks before pushing
+
+echo "Running pre-push checks..."
+
+# Quick lint and test
+if ! golangci-lint run --timeout=2m --fast; then
+    echo "❌ Lint failed. Fix issues before pushing."
+    exit 1
+fi
+
+if ! go build ./...; then
+    echo "❌ Build failed."
+    exit 1
+fi
+
+if ! go test ./...; then
+    echo "❌ Tests failed."
+    exit 1
+fi
+
+echo "✓ Pre-push checks passed"
