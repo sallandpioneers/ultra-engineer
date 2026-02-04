@@ -9,6 +9,7 @@ import (
 
 	"github.com/anthropics/ultra-engineer/internal/claude"
 	"github.com/anthropics/ultra-engineer/internal/config"
+	"github.com/anthropics/ultra-engineer/internal/progress"
 	"github.com/anthropics/ultra-engineer/internal/providers"
 	"github.com/anthropics/ultra-engineer/internal/sandbox"
 	"github.com/anthropics/ultra-engineer/internal/state"
@@ -97,47 +98,56 @@ func (o *Orchestrator) loadState(ctx context.Context, repo string, issueNum int)
 }
 
 func (o *Orchestrator) runStateMachine(ctx context.Context, repo string, issue *providers.Issue, st *state.State, sb *sandbox.Sandbox) error {
+	// Create progress reporter for this issue
+	reporter := progress.NewReporter(
+		o.provider,
+		repo,
+		issue.Number,
+		o.config.Progress.DebounceInterval,
+		o.config.Progress.Enabled,
+	)
+
 	for {
 		o.logger.Printf("Phase: %s", st.CurrentPhase)
 
 		switch st.CurrentPhase {
 		case state.PhaseNew:
-			if err := o.handleNew(ctx, repo, issue, st, sb); err != nil {
-				return o.fail(ctx, repo, issue.Number, st, err)
+			if err := o.handleNew(ctx, repo, issue, st, sb, reporter); err != nil {
+				return o.fail(ctx, repo, issue.Number, st, err, reporter)
 			}
 
 		case state.PhaseQuestions:
-			done, err := o.handleQuestions(ctx, repo, issue, st, sb)
+			done, err := o.handleQuestions(ctx, repo, issue, st, sb, reporter)
 			if err != nil {
-				return o.fail(ctx, repo, issue.Number, st, err)
+				return o.fail(ctx, repo, issue.Number, st, err, reporter)
 			}
 			if done {
 				return nil // Waiting for user
 			}
 
 		case state.PhasePlanning:
-			if err := o.handlePlanning(ctx, repo, issue, st, sb); err != nil {
-				return o.fail(ctx, repo, issue.Number, st, err)
+			if err := o.handlePlanning(ctx, repo, issue, st, sb, reporter); err != nil {
+				return o.fail(ctx, repo, issue.Number, st, err, reporter)
 			}
 
 		case state.PhaseApproval:
-			done, err := o.handleApproval(ctx, repo, issue, st, sb)
+			done, err := o.handleApproval(ctx, repo, issue, st, sb, reporter)
 			if err != nil {
-				return o.fail(ctx, repo, issue.Number, st, err)
+				return o.fail(ctx, repo, issue.Number, st, err, reporter)
 			}
 			if done {
 				return nil // Waiting for user
 			}
 
 		case state.PhaseImplementing:
-			if err := o.handleImplementing(ctx, repo, issue, st, sb); err != nil {
-				return o.fail(ctx, repo, issue.Number, st, err)
+			if err := o.handleImplementing(ctx, repo, issue, st, sb, reporter); err != nil {
+				return o.fail(ctx, repo, issue.Number, st, err, reporter)
 			}
 
 		case state.PhaseReview:
-			done, err := o.handleReview(ctx, repo, issue, st, sb)
+			done, err := o.handleReview(ctx, repo, issue, st, sb, reporter)
 			if err != nil {
-				return o.fail(ctx, repo, issue.Number, st, err)
+				return o.fail(ctx, repo, issue.Number, st, err, reporter)
 			}
 			if done {
 				return nil
@@ -145,6 +155,7 @@ func (o *Orchestrator) runStateMachine(ctx context.Context, repo string, issue *
 
 		case state.PhaseCompleted:
 			o.logger.Printf("Issue #%d completed", issue.Number)
+			reporter.Finalize(ctx, progress.FormatCompleted(st.PRNumber))
 			return nil
 
 		case state.PhaseFailed:
@@ -153,8 +164,9 @@ func (o *Orchestrator) runStateMachine(ctx context.Context, repo string, issue *
 	}
 }
 
-func (o *Orchestrator) handleNew(ctx context.Context, repo string, issue *providers.Issue, st *state.State, sb *sandbox.Sandbox) error {
+func (o *Orchestrator) handleNew(ctx context.Context, repo string, issue *providers.Issue, st *state.State, sb *sandbox.Sandbox, reporter *progress.Reporter) error {
 	o.logger.Printf("Analyzing issue...")
+	reporter.ForceUpdate(ctx, progress.StatusAnalyzing)
 
 	result, err := o.qaPhase.AnalyzeIssue(ctx, issue, sb.RepoDir)
 	if err != nil {
@@ -175,7 +187,7 @@ func (o *Orchestrator) handleNew(ctx context.Context, repo string, issue *provid
 	return nil
 }
 
-func (o *Orchestrator) handleQuestions(ctx context.Context, repo string, issue *providers.Issue, st *state.State, sb *sandbox.Sandbox) (bool, error) {
+func (o *Orchestrator) handleQuestions(ctx context.Context, repo string, issue *providers.Issue, st *state.State, sb *sandbox.Sandbox, reporter *progress.Reporter) (bool, error) {
 	comments, err := o.provider.GetComments(ctx, repo, issue.Number)
 	if err != nil {
 		return false, err
@@ -209,11 +221,14 @@ func (o *Orchestrator) handleQuestions(ctx context.Context, repo string, issue *
 	return false, nil
 }
 
-func (o *Orchestrator) handlePlanning(ctx context.Context, repo string, issue *providers.Issue, st *state.State, sb *sandbox.Sandbox) error {
+func (o *Orchestrator) handlePlanning(ctx context.Context, repo string, issue *providers.Issue, st *state.State, sb *sandbox.Sandbox, reporter *progress.Reporter) error {
 	o.logger.Printf("Running %d plan reviews...", o.config.Claude.ReviewCycles)
+	reporter.ForceUpdate(ctx, progress.StatusPlanning)
 
+	totalCycles := o.config.Claude.ReviewCycles
 	err := o.planPhase.RunFullReviewCycle(ctx, sb.RepoDir, func(i int) {
-		o.logger.Printf("Plan review %d/%d", i, o.config.Claude.ReviewCycles)
+		o.logger.Printf("Plan review %d/%d", i, totalCycles)
+		reporter.Update(ctx, progress.FormatPlanReview(i, totalCycles))
 	})
 	if err != nil {
 		return err
@@ -230,11 +245,12 @@ func (o *Orchestrator) handlePlanning(ctx context.Context, repo string, issue *p
 		return err
 	}
 
+	reporter.ForceUpdate(ctx, progress.StatusWaitingApproval)
 	o.setLabel(ctx, repo, issue.Number, state.PhaseApproval)
 	return nil
 }
 
-func (o *Orchestrator) handleApproval(ctx context.Context, repo string, issue *providers.Issue, st *state.State, sb *sandbox.Sandbox) (bool, error) {
+func (o *Orchestrator) handleApproval(ctx context.Context, repo string, issue *providers.Issue, st *state.State, sb *sandbox.Sandbox, reporter *progress.Reporter) (bool, error) {
 	comments, err := o.provider.GetComments(ctx, repo, issue.Number)
 	if err != nil {
 		return false, err
@@ -272,6 +288,7 @@ func (o *Orchestrator) handleApproval(ctx context.Context, repo string, issue *p
 	// Handle feedback
 	feedback := workflow.ExtractFeedback(response.Body)
 	o.logger.Printf("Integrating feedback...")
+	reporter.ForceUpdate(ctx, progress.StatusPlanning)
 
 	needsReReview, err := o.planPhase.IntegrateFeedback(ctx, feedback, sb.RepoDir)
 	if err != nil {
@@ -280,8 +297,10 @@ func (o *Orchestrator) handleApproval(ctx context.Context, repo string, issue *p
 
 	if needsReReview {
 		o.logger.Printf("Re-reviewing plan...")
+		totalCycles := o.config.Claude.ReviewCycles
 		o.planPhase.RunFullReviewCycle(ctx, sb.RepoDir, func(i int) {
-			o.logger.Printf("Plan re-review %d/%d", i, o.config.Claude.ReviewCycles)
+			o.logger.Printf("Plan re-review %d/%d", i, totalCycles)
+			reporter.Update(ctx, progress.FormatPlanReview(i, totalCycles))
 		})
 	}
 
@@ -292,16 +311,18 @@ func (o *Orchestrator) handleApproval(ctx context.Context, repo string, issue *p
 		return false, err
 	}
 
+	reporter.ForceUpdate(ctx, progress.StatusWaitingApproval)
 	return true, nil // Wait for approval again
 }
 
-func (o *Orchestrator) handleImplementing(ctx context.Context, repo string, issue *providers.Issue, st *state.State, sb *sandbox.Sandbox) error {
+func (o *Orchestrator) handleImplementing(ctx context.Context, repo string, issue *providers.Issue, st *state.State, sb *sandbox.Sandbox, reporter *progress.Reporter) error {
 	baseBranch := o.config.Defaults.BaseBranch
 	if b, _ := o.provider.GetDefaultBranch(ctx, repo); b != "" {
 		baseBranch = b
 	}
 
 	o.logger.Printf("Implementing with git operations...")
+	reporter.ForceUpdate(ctx, progress.StatusImplementing)
 	result, err := o.implPhase.ImplementWithGit(ctx, issue.Title, issue.Number, baseBranch, sb)
 	if err != nil {
 		return err
@@ -309,7 +330,7 @@ func (o *Orchestrator) handleImplementing(ctx context.Context, repo string, issu
 
 	// Handle merge conflict
 	if result.MergeConflict {
-		return o.failWithMergeConflict(ctx, repo, issue.Number, st, result.ConflictingFiles)
+		return o.failWithMergeConflict(ctx, repo, issue.Number, st, result.ConflictingFiles, reporter)
 	}
 
 	// Store branch name from Claude's choice (for PR workflow)
@@ -318,8 +339,10 @@ func (o *Orchestrator) handleImplementing(ctx context.Context, repo string, issu
 	}
 
 	o.logger.Printf("Running %d code reviews...", o.config.Claude.ReviewCycles)
+	totalCycles := o.config.Claude.ReviewCycles
 	err = o.implPhase.RunFullCodeReviewCycle(ctx, sb, func(i int) {
-		o.logger.Printf("Code review %d/%d", i, o.config.Claude.ReviewCycles)
+		o.logger.Printf("Code review %d/%d", i, totalCycles)
+		reporter.Update(ctx, progress.FormatCodeReview(i, totalCycles))
 	})
 	if err != nil {
 		return err
@@ -330,9 +353,10 @@ func (o *Orchestrator) handleImplementing(ctx context.Context, repo string, issu
 	return nil
 }
 
-func (o *Orchestrator) handleReview(ctx context.Context, repo string, issue *providers.Issue, st *state.State, sb *sandbox.Sandbox) (bool, error) {
+func (o *Orchestrator) handleReview(ctx context.Context, repo string, issue *providers.Issue, st *state.State, sb *sandbox.Sandbox, reporter *progress.Reporter) (bool, error) {
 	if st.PRNumber == 0 {
 		o.logger.Printf("Creating PR...")
+		reporter.ForceUpdate(ctx, progress.StatusCreatingPR)
 		baseBranch, _ := o.provider.GetDefaultBranch(ctx, repo)
 		if baseBranch == "" {
 			baseBranch = o.config.Defaults.BaseBranch
@@ -372,10 +396,12 @@ func (o *Orchestrator) handleReview(ctx context.Context, repo string, issue *pro
 	return true, nil // Wait for CI/reviews
 }
 
-func (o *Orchestrator) fail(ctx context.Context, repo string, issueNum int, st *state.State, err error) error {
+func (o *Orchestrator) fail(ctx context.Context, repo string, issueNum int, st *state.State, err error, reporter *progress.Reporter) error {
 	o.logger.Printf("Error: %v", err)
 	st.Error = err.Error()
 	st.SetPhase(state.PhaseFailed)
+
+	reporter.Finalize(ctx, progress.FormatFailed(err))
 
 	comment := fmt.Sprintf("**Error:**\n```\n%s\n```", err.Error())
 	commentWithState, _ := st.AppendToBody(comment)
@@ -386,12 +412,14 @@ func (o *Orchestrator) fail(ctx context.Context, repo string, issueNum int, st *
 }
 
 // failWithMergeConflict handles the case when Claude cannot resolve a merge conflict
-func (o *Orchestrator) failWithMergeConflict(ctx context.Context, repo string, issueNum int, st *state.State, conflictingFiles []string) error {
+func (o *Orchestrator) failWithMergeConflict(ctx context.Context, repo string, issueNum int, st *state.State, conflictingFiles []string, reporter *progress.Reporter) error {
 	o.logger.Printf("Merge conflict in files: %v", conflictingFiles)
 
 	st.FailureReason = "merge_conflict"
 	st.Error = fmt.Sprintf("Merge conflict in: %s", strings.Join(conflictingFiles, ", "))
 	st.SetPhase(state.PhaseFailed)
+
+	reporter.Finalize(ctx, progress.FormatFailed(fmt.Errorf("merge conflict")))
 
 	// Format the conflict message
 	var sb strings.Builder

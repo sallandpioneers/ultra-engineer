@@ -70,7 +70,8 @@ func (p *PlanningPhase) PostPlan(ctx context.Context, repo string, issueNum int,
 	if err != nil {
 		return err
 	}
-	return p.provider.CreateComment(ctx, repo, issueNum, commentWithState)
+	_, err = p.provider.CreateComment(ctx, repo, issueNum, commentWithState)
+	return err
 }
 
 // IntegrateFeedback writes feedback to a file for Claude to process

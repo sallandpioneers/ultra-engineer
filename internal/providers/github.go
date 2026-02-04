@@ -181,8 +181,27 @@ func (g *GitHubProvider) GetComments(ctx context.Context, repo string, number in
 	return result, nil
 }
 
-func (g *GitHubProvider) CreateComment(ctx context.Context, repo string, number int, body string) error {
-	_, err := g.runGH(ctx, "issue", "comment", strconv.Itoa(number), "--repo", repo, "--body", body)
+func (g *GitHubProvider) CreateComment(ctx context.Context, repo string, number int, body string) (int64, error) {
+	// Use gh api to create a comment and get the ID back
+	endpoint := fmt.Sprintf("/repos/%s/issues/%d/comments", repo, number)
+	out, err := g.runGH(ctx, "api", endpoint, "-X", "POST", "-f", "body="+body)
+	if err != nil {
+		return 0, err
+	}
+
+	// Parse the response to get the comment ID
+	var response struct {
+		ID int64 `json:"id"`
+	}
+	if err := json.Unmarshal(out, &response); err != nil {
+		return 0, fmt.Errorf("failed to parse comment response: %w", err)
+	}
+	return response.ID, nil
+}
+
+func (g *GitHubProvider) UpdateComment(ctx context.Context, repo string, commentID int64, body string) error {
+	endpoint := fmt.Sprintf("/repos/%s/issues/comments/%d", repo, commentID)
+	_, err := g.runGH(ctx, "api", endpoint, "-X", "PATCH", "-f", "body="+body)
 	return err
 }
 

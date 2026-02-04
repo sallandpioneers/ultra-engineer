@@ -66,7 +66,7 @@ func abortIssue(repo string, issueNum int) error {
 
 	// Post abort comment
 	comment := "**Processing aborted** via CLI command."
-	if err := provider.CreateComment(ctx, repo, issueNum, comment); err != nil {
+	if _, err := provider.CreateComment(ctx, repo, issueNum, comment); err != nil {
 		return fmt.Errorf("failed to post abort comment: %w", err)
 	}
 

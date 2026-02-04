@@ -384,7 +384,7 @@ func (d *Daemon) persistAllInProgressStates(ctx context.Context) {
 			d.logger.Printf("Failed to serialize state for %s: %v", jobID, err)
 			continue
 		}
-		if err := d.provider.CreateComment(ctx, repo, issueNum, comment); err != nil {
+		if _, err := d.provider.CreateComment(ctx, repo, issueNum, comment); err != nil {
 			d.logger.Printf("Failed to persist state for %s: %v", jobID, err)
 		}
 	}

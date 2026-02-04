@@ -22,6 +22,7 @@ type Config struct {
 	Retry       RetryConfig       `yaml:"retry"`
 	Defaults    DefaultsConfig    `yaml:"defaults"`
 	Concurrency ConcurrencyConfig `yaml:"concurrency"`
+	Progress    ProgressConfig    `yaml:"progress"`
 }
 
 type GiteaConfig struct {
@@ -62,6 +63,12 @@ type ConcurrencyConfig struct {
 	DependencyDetection string `yaml:"dependency_detection"`  // "auto" | "manual" | "disabled" (default: "auto")
 }
 
+// ProgressConfig controls progress reporting
+type ProgressConfig struct {
+	Enabled          bool          `yaml:"enabled"`           // Enable progress comments (default: true)
+	DebounceInterval time.Duration `yaml:"debounce_interval"` // Minimum time between updates (default: 60s)
+}
+
 // Default configuration values
 func DefaultConfig() *Config {
 	return &Config{
@@ -86,6 +93,10 @@ func DefaultConfig() *Config {
 			MaxPerRepo:          1,
 			MaxTotal:            5,
 			DependencyDetection: "auto",
+		},
+		Progress: ProgressConfig{
+			Enabled:          true,
+			DebounceInterval: 60 * time.Second,
 		},
 	}
 }

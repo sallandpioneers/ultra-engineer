@@ -76,7 +76,8 @@ func (q *QAPhase) PostQuestions(ctx context.Context, repo string, issueNum int, 
 	if err != nil {
 		return err
 	}
-	return q.provider.CreateComment(ctx, repo, issueNum, commentWithState)
+	_, err = q.provider.CreateComment(ctx, repo, issueNum, commentWithState)
+	return err
 }
 
 // ParseUserAnswers extracts user answers from a comment
