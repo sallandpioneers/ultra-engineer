@@ -90,7 +90,7 @@ func DefaultConfig() *Config {
 			AutoMerge:  true,
 		},
 		Concurrency: ConcurrencyConfig{
-			MaxPerRepo:          1,
+			MaxPerRepo:          5,
 			MaxTotal:            5,
 			DependencyDetection: "auto",
 		},
