@@ -8,26 +8,38 @@ Orchestrates Claude Code CLI instances to automatically implement issues from Gi
 - **Planning**: Create and review implementation plans
 - **Implementation**: Write code with automated review cycles
 - **PR Management**: Create PRs, fix CI failures, and auto-merge
+- **Concurrent Processing**: Handle multiple issues with dependency detection
+- **CI Integration**: Optional CI monitoring with automated fix attempts
 
-## Build
+## Documentation
+
+| Document | Description |
+|----------|-------------|
+| [Architecture](docs/architecture.md) | System design and component interactions |
+| [Workflow](docs/workflow.md) | Detailed phase documentation |
+| [Configuration](docs/configuration.md) | Complete configuration reference |
+| [Providers](docs/providers.md) | GitHub, Gitea, and provider extension guide |
+| [CLI Reference](docs/cli.md) | Command-line interface documentation |
+| [Troubleshooting](docs/troubleshooting.md) | Common issues and solutions |
+| [Contributing](CONTRIBUTING.md) | Development setup and contribution guide |
+| [ADRs](docs/adr/) | Architecture Decision Records |
+| [AI Agents](AGENTS.md) | Context for AI-assisted development |
+
+## Quick Start
+
+### Build
 
 ```bash
 go build -o ultra-engineer ./cmd/ultra-engineer
 ```
 
-## Configuration
+### Configure
 
-Copy `config.example.yaml` to `config.yaml` and configure:
+Copy `config.example.yaml` to `config.yaml`:
 
 ```yaml
-provider: gitea  # or github
-
-poll_interval: 60s
+provider: github  # or gitea
 trigger_label: ai-implement
-
-gitea:
-  url: https://gitea.example.com
-  token: ${GITEA_TOKEN}
 
 github:
   token: ${GITHUB_TOKEN}
@@ -35,35 +47,29 @@ github:
 claude:
   command: claude
   timeout: 30m
-  review_cycles: 5
-
-retry:
-  max_attempts: 3
-  backoff_base: 10s
-  rate_limit_retry: 5m
-
-defaults:
-  base_branch: main
-  auto_merge: true
 ```
 
-### Default Values
+See [Configuration Guide](docs/configuration.md) for all options.
 
-| Setting | Default |
-|---------|---------|
-| provider | gitea |
-| poll_interval | 60s |
-| trigger_label | ai-implement |
-| claude.command | claude |
-| claude.timeout | 30m |
-| claude.review_cycles | 5 |
-| retry.max_attempts | 3 |
-| retry.backoff_base | 10s |
-| retry.rate_limit_retry | 5m |
-| defaults.base_branch | main |
-| defaults.auto_merge | true |
+### Run
+
+```bash
+# Continuous daemon mode
+ultra-engineer daemon --repo owner/repo
+
+# Single issue processing
+ultra-engineer run --repo owner/repo --issue 123
+```
 
 ## Commands
+
+| Command | Description |
+|---------|-------------|
+| `daemon` | Continuously poll and process issues |
+| `run` | Process a single issue |
+| `status` | Show processing status |
+| `abort` | Stop processing an issue |
+| `version` | Print version info |
 
 ### daemon
 
@@ -108,8 +114,11 @@ ultra-engineer version
 
 ## Global Flags
 
-- `-c, --config` - Path to config file (default: `config.yaml`)
-- `-v, --verbose` - Enable verbose logging
+| Flag | Short | Description |
+|------|-------|-------------|
+| `--config` | `-c` | Path to config file (default: `config.yaml`) |
+| `--verbose` | `-v` | Enable verbose logging |
+| `--log-file` | | Path to log file |
 
 ## Workflow Phases
 
@@ -126,7 +135,18 @@ Issues progress through these phases, tracked via labels:
 | completed | `phase:completed` | Successfully completed |
 | failed | `phase:failed` | Failed or aborted |
 
+See [Workflow Documentation](docs/workflow.md) for detailed phase descriptions.
+
 ## Supported Providers
 
-- **gitea** - Full support via Gitea API
-- **github** - Full support via `gh` CLI
+| Provider | Status | Implementation |
+|----------|--------|----------------|
+| GitHub | Full support | `gh` CLI |
+| Gitea | Full support | HTTP API |
+| GitLab | Config-ready | Not yet implemented |
+
+See [Provider Documentation](docs/providers.md) for setup instructions.
+
+## License
+
+[MIT License](LICENSE)
