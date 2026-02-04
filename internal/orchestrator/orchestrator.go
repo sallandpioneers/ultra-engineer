@@ -33,12 +33,19 @@ type Orchestrator struct {
 	planPhase *workflow.PlanningPhase
 	implPhase *workflow.ImplementationPhase
 	prPhase   *workflow.PRPhase
+	ciMonitor *workflow.CIMonitor // may be nil if provider doesn't support CI or CI is disabled
 }
 
 // New creates a new orchestrator
 func New(cfg *config.Config, provider providers.Provider, logger *log.Logger) *Orchestrator {
 	claudeClient := claude.NewClient(cfg.Claude.Command, cfg.Claude.Timeout)
 	sandboxMgr := sandbox.NewManager("")
+
+	// Initialize CI monitor if provider supports it and CI is enabled
+	var ciMonitor *workflow.CIMonitor
+	if ciProvider, ok := provider.(providers.CIProvider); ok && cfg.CI.WaitForCI {
+		ciMonitor = workflow.NewCIMonitor(ciProvider, cfg.CI.PollInterval, cfg.CI.Timeout)
+	}
 
 	return &Orchestrator{
 		config:    cfg,
@@ -50,6 +57,7 @@ func New(cfg *config.Config, provider providers.Provider, logger *log.Logger) *O
 		planPhase: workflow.NewPlanningPhase(claudeClient, provider, cfg.Claude.ReviewCycles),
 		implPhase: workflow.NewImplementationPhase(claudeClient, provider, cfg.Claude.ReviewCycles),
 		prPhase:   workflow.NewPRPhase(provider, claudeClient),
+		ciMonitor: ciMonitor,
 	}
 }
 
@@ -177,9 +185,12 @@ func (o *Orchestrator) handleNew(ctx context.Context, repo string, issue *provid
 		st.SetPhase(state.PhasePlanning)
 		o.setLabel(ctx, repo, issue.Number, state.PhasePlanning)
 	} else {
+		oldQARound := st.QARound
 		st.QARound = 1
-		st.SetPhase(state.PhaseQuestions) // Set phase BEFORE posting so state is correct
+		rollback := st.SetPhaseWithRollback(state.PhaseQuestions)
 		if err := o.qaPhase.PostQuestions(ctx, repo, issue.Number, result.Questions, 1, st); err != nil {
+			rollback()
+			st.QARound = oldQARound
 			return err
 		}
 		o.setLabel(ctx, repo, issue.Number, state.PhaseQuestions)
@@ -239,9 +250,9 @@ func (o *Orchestrator) handlePlanning(ctx context.Context, repo string, issue *p
 		return fmt.Errorf("failed to read plan: %w", err)
 	}
 
-	st.SetPhase(state.PhaseApproval)
-
+	rollback := st.SetPhaseWithRollback(state.PhaseApproval)
 	if err := o.planPhase.PostPlan(ctx, repo, issue.Number, plan, st); err != nil {
+		rollback()
 		return err
 	}
 
@@ -304,10 +315,15 @@ func (o *Orchestrator) handleApproval(ctx context.Context, repo string, issue *p
 		})
 	}
 
-	plan, _ := o.planPhase.GetPlan(sb.RepoDir)
-	st.PlanVersion++
+	plan, err := o.planPhase.GetPlan(sb.RepoDir)
+	if err != nil {
+		return false, fmt.Errorf("failed to read plan: %w", err)
+	}
 
+	oldVersion := st.PlanVersion
+	st.PlanVersion++
 	if err := o.planPhase.PostPlan(ctx, repo, issue.Number, plan, st); err != nil {
+		st.PlanVersion = oldVersion
 		return false, err
 	}
 
@@ -421,15 +437,33 @@ func (o *Orchestrator) handleReview(ctx context.Context, repo string, issue *pro
 		}
 
 		// Update state BEFORE posting acknowledgment
+		oldTime := st.LastPRCommentTime
 		st.LastPRCommentTime = latestTime
 
 		// Post acknowledgment on the issue with updated state
 		ackMsg := state.AddBotMarker("Addressed PR feedback and pushed changes.")
 		msgWithState, _ := st.AppendToBody(ackMsg)
-		o.provider.CreateComment(ctx, repo, issue.Number, msgWithState)
+		if _, err := o.provider.CreateComment(ctx, repo, issue.Number, msgWithState); err != nil {
+			st.LastPRCommentTime = oldTime
+			return false, err
+		}
 
 		// Return immediately to wait for CI to run on the new commit
 		return true, nil
+	}
+
+	// Check CI status if monitoring is enabled
+	if o.ciMonitor != nil {
+		ciResult, err := o.handleCIStatus(ctx, repo, issue, st, sb, reporter)
+		if err != nil {
+			return false, err
+		}
+		if ciResult.shouldWait {
+			return true, nil
+		}
+		if ciResult.failed {
+			return false, fmt.Errorf("CI failures could not be fixed after %d attempts", o.config.CI.MaxFixAttempts)
+		}
 	}
 
 	// Check if mergeable
@@ -450,6 +484,120 @@ func (o *Orchestrator) handleReview(ctx context.Context, repo string, issue *pro
 	}
 
 	return true, nil // Wait for CI/reviews
+}
+
+// ciHandleResult contains the result of CI status handling
+type ciHandleResult struct {
+	shouldWait bool // true if we should wait and poll again later
+	failed     bool // true if CI fix attempts exhausted
+}
+
+// handleCIStatus checks CI status and handles failures
+func (o *Orchestrator) handleCIStatus(ctx context.Context, repo string, issue *providers.Issue, st *state.State, sb *sandbox.Sandbox, reporter *progress.Reporter) (*ciHandleResult, error) {
+	// Initialize CI wait start time if not set
+	if st.CIWaitStartTime.IsZero() {
+		st.CIWaitStartTime = time.Now()
+	}
+
+	// Check if we've exceeded the CI timeout
+	if time.Since(st.CIWaitStartTime) > o.config.CI.Timeout {
+		o.logger.Printf("CI timeout exceeded")
+		reporter.Update(ctx, progress.FormatCITimeout(o.config.CI.Timeout))
+		// Don't fail, just stop waiting for CI
+		return &ciHandleResult{shouldWait: false}, nil
+	}
+
+	// Get CI provider
+	ciProvider, ok := o.provider.(providers.CIProvider)
+	if !ok {
+		return &ciHandleResult{shouldWait: false}, nil
+	}
+
+	// Check CI status
+	ciResult, err := ciProvider.GetCIStatus(ctx, repo, st.PRNumber)
+	if err != nil {
+		o.logger.Printf("Warning: failed to get CI status: %v", err)
+		return &ciHandleResult{shouldWait: true}, nil // Continue polling
+	}
+
+	st.LastCIStatus = string(ciResult.OverallStatus)
+
+	switch ciResult.OverallStatus {
+	case providers.CIStatusSuccess:
+		o.logger.Printf("CI passed")
+		reporter.Update(ctx, progress.StatusCISuccess)
+		// Reset CI tracking for next iteration
+		st.CIWaitStartTime = time.Time{}
+		st.CIFixAttempts = 0
+		return &ciHandleResult{shouldWait: false}, nil
+
+	case providers.CIStatusPending:
+		reporter.Update(ctx, progress.StatusWaitingCI)
+		return &ciHandleResult{shouldWait: true}, nil
+
+	case providers.CIStatusFailure:
+		// Check if we've exceeded max fix attempts
+		if st.CIFixAttempts >= o.config.CI.MaxFixAttempts {
+			o.logger.Printf("CI fix attempts exhausted (%d/%d)", st.CIFixAttempts, o.config.CI.MaxFixAttempts)
+			reporter.Update(ctx, progress.FormatCIFixMaxAttempts(st.CIFixAttempts, o.config.CI.MaxFixAttempts))
+			return &ciHandleResult{failed: true}, nil
+		}
+
+		// Collect failed checks
+		var failedChecks []providers.CICheck
+		for _, check := range ciResult.Checks {
+			if check.Status == providers.CIStatusFailure {
+				failedChecks = append(failedChecks, check)
+			}
+		}
+
+		if len(failedChecks) == 0 {
+			// No specific failed checks found, treat as pending
+			return &ciHandleResult{shouldWait: true}, nil
+		}
+
+		// Get logs for failed checks
+		logs, err := o.ciMonitor.GetFailureLogs(ctx, repo, failedChecks)
+		if err != nil {
+			o.logger.Printf("Warning: failed to get CI logs: %v", err)
+			logs = "Could not retrieve CI logs"
+		}
+
+		// Increment fix attempts
+		st.CIFixAttempts++
+		o.logger.Printf("Attempting to fix CI failure (attempt %d/%d)", st.CIFixAttempts, o.config.CI.MaxFixAttempts)
+		reporter.ForceUpdate(ctx, progress.FormatFixingCI(st.CIFixAttempts, o.config.CI.MaxFixAttempts))
+
+		// Build check name summary
+		var checkNames []string
+		for _, check := range failedChecks {
+			checkNames = append(checkNames, check.Name)
+		}
+		checkNameSummary := strings.Join(checkNames, ", ")
+
+		// Call Claude to fix the CI failure
+		if err := o.implPhase.FixCIFailure(ctx, checkNameSummary, logs, st.BranchName, sb); err != nil {
+			o.logger.Printf("CI fix attempt failed: %v", err)
+			// Don't return error, let it try again on next poll
+		}
+
+		// Post progress comment (ignore error - non-critical)
+		comment := fmt.Sprintf("CI failed: %s. Attempting fix (%d/%d)...", checkNameSummary, st.CIFixAttempts, o.config.CI.MaxFixAttempts)
+		msgWithState, _ := st.AppendToBody(state.AddBotMarker(comment))
+		if _, err := o.provider.CreateComment(ctx, repo, issue.Number, msgWithState); err != nil {
+			o.logger.Printf("Warning: failed to post CI fix comment: %v", err)
+		}
+
+		// Reset wait start time for the new commit
+		st.CIWaitStartTime = time.Now()
+		return &ciHandleResult{shouldWait: true}, nil
+
+	case providers.CIStatusUnknown:
+		// No CI configured, proceed
+		return &ciHandleResult{shouldWait: false}, nil
+	}
+
+	return &ciHandleResult{shouldWait: true}, nil
 }
 
 func (o *Orchestrator) fail(ctx context.Context, repo string, issueNum int, st *state.State, err error, reporter *progress.Reporter) error {

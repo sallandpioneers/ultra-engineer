@@ -23,6 +23,7 @@ type Config struct {
 	Defaults    DefaultsConfig    `yaml:"defaults"`
 	Concurrency ConcurrencyConfig `yaml:"concurrency"`
 	Progress    ProgressConfig    `yaml:"progress"`
+	CI          CIConfig          `yaml:"ci"`
 }
 
 type GiteaConfig struct {
@@ -69,6 +70,14 @@ type ProgressConfig struct {
 	DebounceInterval time.Duration `yaml:"debounce_interval"` // Minimum time between updates (default: 60s)
 }
 
+// CIConfig controls CI status monitoring
+type CIConfig struct {
+	PollInterval   time.Duration `yaml:"poll_interval"`    // How often to poll CI status (default: 30s)
+	Timeout        time.Duration `yaml:"timeout"`          // Max time to wait for CI (default: 30m)
+	MaxFixAttempts int           `yaml:"max_fix_attempts"` // Max attempts to fix CI failures (default: 3)
+	WaitForCI      bool          `yaml:"wait_for_ci"`      // Whether to wait for CI (default: false, opt-in)
+}
+
 // Default configuration values
 func DefaultConfig() *Config {
 	return &Config{
@@ -97,6 +106,12 @@ func DefaultConfig() *Config {
 		Progress: ProgressConfig{
 			Enabled:          true,
 			DebounceInterval: 60 * time.Second,
+		},
+		CI: CIConfig{
+			PollInterval:   30 * time.Second,
+			Timeout:        30 * time.Minute,
+			MaxFixAttempts: 3,
+			WaitForCI:      false,
 		},
 	}
 }

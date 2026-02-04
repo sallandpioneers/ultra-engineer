@@ -34,7 +34,7 @@ type Daemon struct {
 
 // NewDaemon creates a new daemon
 func NewDaemon(cfg *config.Config, provider providers.Provider, logger *log.Logger) *Daemon {
-	claudeClient := claude.NewClient(cfg.Claude.Command, cfg.Claude.Timeout)
+	claudeClient := claude.NewClientWithRetry(cfg.Claude.Command, cfg.Claude.Timeout, cfg.Retry)
 
 	return &Daemon{
 		config:       cfg,

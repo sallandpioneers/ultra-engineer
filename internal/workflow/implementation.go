@@ -165,8 +165,8 @@ func (i *ImplementationPhase) RunFullCodeReviewCycle(ctx context.Context, sb *sa
 }
 
 // FixCIFailure attempts to fix CI failures
-func (i *ImplementationPhase) FixCIFailure(ctx context.Context, ciOutput string, sb *sandbox.Sandbox) error {
-	prompt := fmt.Sprintf(claude.Prompts.FixCI, ciOutput)
+func (i *ImplementationPhase) FixCIFailure(ctx context.Context, checkName, ciOutput, branchName string, sb *sandbox.Sandbox) error {
+	prompt := fmt.Sprintf(claude.Prompts.FixCI, checkName, ciOutput, branchName)
 
 	_, _, err := i.claude.RunInteractive(ctx, claude.RunOptions{
 		WorkDir:      sb.RepoDir,

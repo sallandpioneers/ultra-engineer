@@ -47,6 +47,11 @@ type State struct {
 	// comments come from different API endpoints with different ID spaces
 	LastPRCommentTime time.Time `json:"last_pr_comment_time,omitempty"`
 
+	// CI tracking
+	CIFixAttempts   int       `json:"ci_fix_attempts,omitempty"`
+	LastCIStatus    string    `json:"last_ci_status,omitempty"`     // stores CIStatus as string for JSON
+	CIWaitStartTime time.Time `json:"ci_wait_start_time,omitempty"` // when we started waiting for CI
+
 	// Dependency tracking for concurrent issue processing
 	DependsOn     []int  `json:"depends_on,omitempty"`     // Issue numbers this issue depends on
 	BlockedBy     []int  `json:"blocked_by,omitempty"`     // Currently blocking issue numbers
@@ -172,6 +177,18 @@ func RemoveState(body string) string {
 func (s *State) SetPhase(phase Phase) {
 	s.CurrentPhase = phase
 	s.LastUpdated = time.Now()
+}
+
+// SetPhaseWithRollback updates the phase and returns a rollback function
+// that restores the previous phase and timestamp if called
+func (s *State) SetPhaseWithRollback(newPhase Phase) (rollback func()) {
+	oldPhase := s.CurrentPhase
+	oldUpdated := s.LastUpdated
+	s.SetPhase(newPhase)
+	return func() {
+		s.CurrentPhase = oldPhase
+		s.LastUpdated = oldUpdated
+	}
 }
 
 // AddQA adds a Q&A entry to the history

@@ -8,12 +8,16 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/anthropics/ultra-engineer/internal/config"
+	"github.com/anthropics/ultra-engineer/internal/retry"
 )
 
 // Client wraps the Claude Code CLI
 type Client struct {
-	command string
-	timeout time.Duration
+	command   string
+	timeout   time.Duration
+	retryOpts *retry.Options
 }
 
 // NewClient creates a new Claude Code client
@@ -21,6 +25,17 @@ func NewClient(command string, timeout time.Duration) *Client {
 	return &Client{
 		command: command,
 		timeout: timeout,
+	}
+}
+
+// NewClientWithRetry creates a new Claude Code client with retry support
+func NewClientWithRetry(command string, timeout time.Duration, retryConfig config.RetryConfig) *Client {
+	opts := retry.DefaultOptions(retryConfig)
+	opts.Classifier = retry.ClassifyClaude
+	return &Client{
+		command:   command,
+		timeout:   timeout,
+		retryOpts: &opts,
 	}
 }
 
@@ -50,6 +65,30 @@ func (c *Client) Run(ctx context.Context, opts RunOptions) (string, error) {
 // RunInteractive runs Claude in a way that allows it to use tools
 // and waits for it to complete its task
 func (c *Client) RunInteractive(ctx context.Context, opts RunOptions) (string, string, error) {
+	// If retry is configured, use retry logic
+	if c.retryOpts != nil {
+		return c.runInteractiveWithRetry(ctx, opts)
+	}
+	return c.runInteractiveOnce(ctx, opts)
+}
+
+// runInteractiveWithRetry wraps runInteractiveOnce with retry logic
+func (c *Client) runInteractiveWithRetry(ctx context.Context, opts RunOptions) (string, string, error) {
+	type result struct {
+		output    string
+		sessionID string
+	}
+
+	r, err := retry.DoWithResult(ctx, *c.retryOpts, func() (result, error) {
+		output, sessionID, err := c.runInteractiveOnce(ctx, opts)
+		return result{output: output, sessionID: sessionID}, err
+	})
+
+	return r.output, r.sessionID, err
+}
+
+// runInteractiveOnce executes a single Claude invocation
+func (c *Client) runInteractiveOnce(ctx context.Context, opts RunOptions) (string, string, error) {
 	ctx, cancel := context.WithTimeout(ctx, c.timeout)
 	defer cancel()
 

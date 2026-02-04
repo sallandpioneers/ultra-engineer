@@ -9,11 +9,16 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/anthropics/ultra-engineer/internal/config"
+	"github.com/anthropics/ultra-engineer/internal/retry"
 )
 
 // GitHubProvider implements Provider using the gh CLI
 // Note: Authentication is handled by the gh CLI (via GH_TOKEN env var or gh auth login)
-type GitHubProvider struct{}
+type GitHubProvider struct {
+	retryOpts *retry.Options
+}
 
 // NewGitHubProvider creates a new GitHub provider
 // The token parameter is kept for interface consistency but authentication
@@ -29,6 +34,18 @@ func NewGitHubProvider(token string) *GitHubProvider {
 	return &GitHubProvider{}
 }
 
+// NewGitHubProviderWithRetry creates a new GitHub provider with retry support
+func NewGitHubProviderWithRetry(token string, retryConfig config.RetryConfig) *GitHubProvider {
+	if token != "" {
+		os.Setenv("GH_TOKEN", token)
+	}
+	opts := retry.DefaultOptions(retryConfig)
+	opts.Classifier = retry.ClassifyHTTPError
+	return &GitHubProvider{
+		retryOpts: &opts,
+	}
+}
+
 func (g *GitHubProvider) Name() string {
 	return "github"
 }
@@ -41,6 +58,17 @@ func (g *GitHubProvider) ghCmd(ctx context.Context, args ...string) *exec.Cmd {
 
 // runGH executes a gh command and returns stdout
 func (g *GitHubProvider) runGH(ctx context.Context, args ...string) ([]byte, error) {
+	// If retry is configured, use retry logic
+	if g.retryOpts != nil {
+		return retry.DoWithResult(ctx, *g.retryOpts, func() ([]byte, error) {
+			return g.runGHOnce(ctx, args...)
+		})
+	}
+	return g.runGHOnce(ctx, args...)
+}
+
+// runGHOnce executes a single gh command
+func (g *GitHubProvider) runGHOnce(ctx context.Context, args ...string) ([]byte, error) {
 	cmd := g.ghCmd(ctx, args...)
 	out, err := cmd.Output()
 	if err != nil {
@@ -390,4 +418,134 @@ func hashNodeID(nodeID string) int64 {
 	}
 	// Convert to int64, keeping it positive for consistency
 	return int64(hash & 0x7FFFFFFFFFFFFFFF)
+}
+
+// ghCheck represents the JSON output from gh pr checks
+type ghCheck struct {
+	Name        string `json:"name"`
+	State       string `json:"state"`      // PENDING, SUCCESS, FAILURE, etc.
+	Status      string `json:"status"`     // queued, in_progress, completed
+	Conclusion  string `json:"conclusion"` // success, failure, cancelled, skipped, etc.
+	DetailsURL  string `json:"detailsUrl"`
+	Description string `json:"description"`
+	WorkflowID  int64  `json:"workflowId"`
+}
+
+// GetCIStatus implements CIProvider for GitHub
+func (g *GitHubProvider) GetCIStatus(ctx context.Context, repo string, prNumber int) (*CIResult, error) {
+	out, err := g.runGH(ctx, "pr", "checks", strconv.Itoa(prNumber), "--repo", repo, "--json", "name,state,status,conclusion,detailsUrl,description,workflowId")
+	if err != nil {
+		return nil, fmt.Errorf("failed to get PR checks: %w", err)
+	}
+
+	var checks []ghCheck
+	if err := json.Unmarshal(out, &checks); err != nil {
+		return nil, fmt.Errorf("failed to parse PR checks: %w", err)
+	}
+
+	result := &CIResult{
+		OverallStatus: CIStatusSuccess, // Default to success if no checks
+		Checks:        make([]CICheck, 0, len(checks)),
+	}
+
+	hasPending := false
+	hasFailure := false
+
+	for _, c := range checks {
+		check := CICheck{
+			ID:         c.WorkflowID,
+			Name:       c.Name,
+			Conclusion: c.Conclusion,
+			DetailsURL: c.DetailsURL,
+			Output:     c.Description,
+		}
+
+		// Map GitHub state/conclusion to CIStatus
+		switch strings.ToUpper(c.State) {
+		case "PENDING":
+			check.Status = CIStatusPending
+			hasPending = true
+		case "SUCCESS":
+			check.Status = CIStatusSuccess
+		case "FAILURE", "ERROR":
+			check.Status = CIStatusFailure
+			hasFailure = true
+		default:
+			// Check conclusion for completed checks
+			switch strings.ToLower(c.Conclusion) {
+			case "success":
+				check.Status = CIStatusSuccess
+			case "failure", "timed_out", "action_required":
+				check.Status = CIStatusFailure
+				hasFailure = true
+			case "cancelled", "skipped", "neutral":
+				check.Status = CIStatusSuccess // Treat as non-blocking
+			default:
+				check.Status = CIStatusPending
+				hasPending = true
+			}
+		}
+
+		result.Checks = append(result.Checks, check)
+	}
+
+	// Determine overall status
+	if hasFailure {
+		result.OverallStatus = CIStatusFailure
+	} else if hasPending {
+		result.OverallStatus = CIStatusPending
+	} else if len(result.Checks) == 0 {
+		result.OverallStatus = CIStatusUnknown
+	}
+
+	return result, nil
+}
+
+// GetCILogs retrieves logs for a GitHub Actions workflow run
+func (g *GitHubProvider) GetCILogs(ctx context.Context, repo string, checkRunID int64) (string, error) {
+	// Use gh api to fetch the check run details with output
+	endpoint := fmt.Sprintf("/repos/%s/check-runs/%d", repo, checkRunID)
+	out, err := g.runGH(ctx, "api", endpoint)
+	if err != nil {
+		return "", fmt.Errorf("failed to get check run: %w", err)
+	}
+
+	var checkRun struct {
+		Output struct {
+			Title   string `json:"title"`
+			Summary string `json:"summary"`
+			Text    string `json:"text"`
+		} `json:"output"`
+		Conclusion string `json:"conclusion"`
+		HTMLURL    string `json:"html_url"`
+	}
+
+	if err := json.Unmarshal(out, &checkRun); err != nil {
+		return "", fmt.Errorf("failed to parse check run: %w", err)
+	}
+
+	// Combine output fields for context
+	var logs strings.Builder
+	if checkRun.Output.Title != "" {
+		logs.WriteString("Title: ")
+		logs.WriteString(checkRun.Output.Title)
+		logs.WriteString("\n\n")
+	}
+	if checkRun.Output.Summary != "" {
+		logs.WriteString("Summary:\n")
+		logs.WriteString(checkRun.Output.Summary)
+		logs.WriteString("\n\n")
+	}
+	if checkRun.Output.Text != "" {
+		logs.WriteString("Details:\n")
+		logs.WriteString(checkRun.Output.Text)
+	}
+
+	// If no output available, provide basic info
+	if logs.Len() == 0 {
+		logs.WriteString(fmt.Sprintf("Check concluded with: %s\n", checkRun.Conclusion))
+		logs.WriteString(fmt.Sprintf("Details: %s\n", checkRun.HTMLURL))
+	}
+
+	return logs.String(), nil
 }

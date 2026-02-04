@@ -22,6 +22,14 @@ const (
 	StatusCompleted       = "✨ Completed successfully"
 	StatusCompletedWithPR = "✨ Completed successfully - PR #%d"
 	StatusFailed          = "❌ Failed: %s"
+
+	// CI status messages
+	StatusWaitingCI        = "⏳ Waiting for CI to complete..."
+	StatusCISuccess        = "✅ CI passed"
+	StatusCIFailed         = "❌ CI failed: %s"
+	StatusFixingCI         = "🔧 Fixing CI failure (attempt %d/%d)..."
+	StatusCITimeout        = "⏰ CI timed out after %s"
+	StatusCIFixMaxAttempts = "❌ CI fix attempts exhausted (%d/%d)"
 )
 
 // Reporter handles posting and updating progress comments on issues
@@ -139,4 +147,24 @@ func FormatCompleted(prNumber int) string {
 // FormatFailed formats the failed status message with error
 func FormatFailed(err error) string {
 	return fmt.Sprintf(StatusFailed, err.Error())
+}
+
+// FormatCIFailed formats the CI failed status message
+func FormatCIFailed(checkName string) string {
+	return fmt.Sprintf(StatusCIFailed, checkName)
+}
+
+// FormatFixingCI formats the fixing CI status message
+func FormatFixingCI(attempt, maxAttempts int) string {
+	return fmt.Sprintf(StatusFixingCI, attempt, maxAttempts)
+}
+
+// FormatCITimeout formats the CI timeout status message
+func FormatCITimeout(duration time.Duration) string {
+	return fmt.Sprintf(StatusCITimeout, duration)
+}
+
+// FormatCIFixMaxAttempts formats the max attempts reached status message
+func FormatCIFixMaxAttempts(attempts, maxAttempts int) string {
+	return fmt.Sprintf(StatusCIFixMaxAttempts, attempts, maxAttempts)
 }

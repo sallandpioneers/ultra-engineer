@@ -105,12 +105,25 @@ Example:
 
 Output "IMPLEMENTATION_COMPLETE <branch-name>" when done.`,
 
-	FixCI: `CI failed. Fix the issues.
+	FixCI: `CI has failed. Analyze the failure and fix the code.
 
-Error:
+## CI Failure Details
+
+**Failed Check:** %s
+**Error Output:**
 %s
 
-Fix the code and output "FIX_COMPLETE" when done.`,
+## Instructions
+
+1. Analyze the error output carefully
+2. Identify the root cause (test failure, lint error, build error, etc.)
+3. Make the necessary code changes
+4. Do NOT skip or delete tests - fix the underlying issue
+5. Stage changes: git add -A
+6. Commit with message describing the fix
+7. Push to branch: git push origin %s
+
+Output "FIX_COMPLETE" when done, or "FIX_FAILED: <reason>" if unable to fix.`,
 
 	SummarizeChanges: `Summarize the code changes for a PR description.
 

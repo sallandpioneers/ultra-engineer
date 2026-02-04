@@ -77,3 +77,39 @@ type Provider interface {
 	// Provider info
 	Name() string
 }
+
+// CIStatus represents the status of a CI check
+type CIStatus string
+
+const (
+	CIStatusPending CIStatus = "pending"
+	CIStatusSuccess CIStatus = "success"
+	CIStatusFailure CIStatus = "failure"
+	CIStatusUnknown CIStatus = "unknown"
+)
+
+// CICheck represents a single CI check run
+type CICheck struct {
+	ID         int64    // Check run ID (for fetching logs)
+	Name       string   // Check name
+	Status     CIStatus // Check status
+	Conclusion string   // Conclusion (success, failure, cancelled, etc.)
+	DetailsURL string   // URL to view details
+	Output     string   // Summary output (may be truncated)
+}
+
+// CIResult represents the combined CI status for a PR
+type CIResult struct {
+	OverallStatus CIStatus  // Combined status
+	Checks        []CICheck // Individual checks
+}
+
+// CIProvider is an optional interface for CI operations
+// Use type assertion: if ciProvider, ok := provider.(CIProvider); ok { ... }
+type CIProvider interface {
+	// GetCIStatus returns the CI status for a PR
+	GetCIStatus(ctx context.Context, repo string, prNumber int) (*CIResult, error)
+
+	// GetCILogs retrieves logs for a specific check run
+	GetCILogs(ctx context.Context, repo string, checkRunID int64) (string, error)
+}

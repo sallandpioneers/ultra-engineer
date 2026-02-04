@@ -11,13 +11,17 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/anthropics/ultra-engineer/internal/config"
+	"github.com/anthropics/ultra-engineer/internal/retry"
 )
 
 // GiteaProvider implements Provider using Gitea API directly
 type GiteaProvider struct {
-	baseURL string
-	token   string
-	client  *http.Client
+	baseURL   string
+	token     string
+	client    *http.Client
+	retryOpts *retry.Options
 }
 
 // NewGiteaProvider creates a new Gitea provider
@@ -29,12 +33,35 @@ func NewGiteaProvider(url, token string) *GiteaProvider {
 	}
 }
 
+// NewGiteaProviderWithRetry creates a new Gitea provider with retry support
+func NewGiteaProviderWithRetry(url, token string, retryConfig config.RetryConfig) *GiteaProvider {
+	opts := retry.DefaultOptions(retryConfig)
+	opts.Classifier = retry.ClassifyHTTPError
+	return &GiteaProvider{
+		baseURL:   strings.TrimSuffix(url, "/"),
+		token:     token,
+		client:    &http.Client{Timeout: 30 * time.Second},
+		retryOpts: &opts,
+	}
+}
+
 func (g *GiteaProvider) Name() string {
 	return "gitea"
 }
 
 // doRequest performs an HTTP request to the Gitea API
 func (g *GiteaProvider) doRequest(ctx context.Context, method, path string, body interface{}) ([]byte, error) {
+	// If retry is configured, use retry logic
+	if g.retryOpts != nil {
+		return retry.DoWithResult(ctx, *g.retryOpts, func() ([]byte, error) {
+			return g.doRequestOnce(ctx, method, path, body)
+		})
+	}
+	return g.doRequestOnce(ctx, method, path, body)
+}
+
+// doRequestOnce performs a single HTTP request to the Gitea API
+func (g *GiteaProvider) doRequestOnce(ctx context.Context, method, path string, body interface{}) ([]byte, error) {
 	url := g.baseURL + "/api/v1" + path
 
 	var reqBody io.Reader
@@ -499,4 +526,174 @@ func (g *GiteaProvider) GetDefaultBranch(ctx context.Context, repo string) (stri
 		return "main", nil
 	}
 	return repoInfo.DefaultBranch, nil
+}
+
+// giteaCommitStatus represents a commit status from Gitea's API
+type giteaCommitStatus struct {
+	ID          int64  `json:"id"`
+	State       string `json:"status"` // pending, success, error, failure, warning
+	Context     string `json:"context"`
+	Description string `json:"description"`
+	TargetURL   string `json:"target_url"`
+}
+
+// giteaCombinedStatus represents combined commit status from Gitea
+type giteaCombinedStatus struct {
+	State    string              `json:"state"` // pending, success, error, failure
+	Statuses []giteaCommitStatus `json:"statuses"`
+}
+
+// giteaActionRun represents a Gitea Actions workflow run
+type giteaActionRun struct {
+	ID         int64  `json:"id"`
+	WorkflowID string `json:"workflow_id"`
+	Status     string `json:"status"`     // waiting, running, completed
+	Conclusion string `json:"conclusion"` // success, failure, cancelled, etc.
+	HTMLURL    string `json:"html_url"`
+}
+
+// GetCIStatus implements CIProvider for Gitea
+func (g *GiteaProvider) GetCIStatus(ctx context.Context, repo string, prNumber int) (*CIResult, error) {
+	// Get the PR details including head SHA
+	prPath := fmt.Sprintf("/repos/%s/pulls/%d", repo, prNumber)
+	prData, err := g.doRequest(ctx, "GET", prPath, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get PR: %w", err)
+	}
+
+	var prDetails struct {
+		Head struct {
+			SHA string `json:"sha"`
+			Ref string `json:"ref"`
+		} `json:"head"`
+	}
+	if err := json.Unmarshal(prData, &prDetails); err != nil {
+		return nil, fmt.Errorf("failed to parse PR details: %w", err)
+	}
+
+	// Get combined commit status
+	statusPath := fmt.Sprintf("/repos/%s/commits/%s/status", repo, prDetails.Head.SHA)
+	statusData, err := g.doRequest(ctx, "GET", statusPath, nil)
+	if err != nil {
+		// If no status found, return unknown
+		return &CIResult{
+			OverallStatus: CIStatusUnknown,
+			Checks:        []CICheck{},
+		}, nil
+	}
+
+	var combined giteaCombinedStatus
+	if err := json.Unmarshal(statusData, &combined); err != nil {
+		return nil, fmt.Errorf("failed to parse commit status: %w", err)
+	}
+
+	result := &CIResult{
+		Checks: make([]CICheck, 0, len(combined.Statuses)),
+	}
+
+	for _, s := range combined.Statuses {
+		check := CICheck{
+			ID:         s.ID,
+			Name:       s.Context,
+			Conclusion: s.State,
+			DetailsURL: s.TargetURL,
+			Output:     s.Description,
+		}
+
+		switch strings.ToLower(s.State) {
+		case "pending":
+			check.Status = CIStatusPending
+		case "success":
+			check.Status = CIStatusSuccess
+		case "error", "failure":
+			check.Status = CIStatusFailure
+		default:
+			check.Status = CIStatusUnknown
+		}
+
+		result.Checks = append(result.Checks, check)
+	}
+
+	// Map overall state
+	switch strings.ToLower(combined.State) {
+	case "pending":
+		result.OverallStatus = CIStatusPending
+	case "success":
+		result.OverallStatus = CIStatusSuccess
+	case "error", "failure":
+		result.OverallStatus = CIStatusFailure
+	default:
+		if len(result.Checks) == 0 {
+			result.OverallStatus = CIStatusUnknown
+		} else {
+			result.OverallStatus = CIStatusPending
+		}
+	}
+
+	// Also try to get Gitea Actions runs if available
+	g.enrichWithActionRuns(ctx, repo, prDetails.Head.Ref, result)
+
+	return result, nil
+}
+
+// enrichWithActionRuns adds Gitea Actions runs to the CI result
+func (g *GiteaProvider) enrichWithActionRuns(ctx context.Context, repo, branch string, result *CIResult) {
+	// Try to fetch Gitea Actions runs for the branch
+	actionsPath := fmt.Sprintf("/repos/%s/actions/runs?branch=%s", repo, url.QueryEscape(branch))
+	data, err := g.doRequest(ctx, "GET", actionsPath, nil)
+	if err != nil {
+		// Actions might not be enabled, silently skip
+		return
+	}
+
+	var response struct {
+		Runs []giteaActionRun `json:"workflow_runs"`
+	}
+	if err := json.Unmarshal(data, &response); err != nil {
+		return
+	}
+
+	for _, run := range response.Runs {
+		check := CICheck{
+			ID:         run.ID,
+			Name:       run.WorkflowID,
+			Conclusion: run.Conclusion,
+			DetailsURL: run.HTMLURL,
+		}
+
+		switch strings.ToLower(run.Status) {
+		case "waiting", "running", "queued":
+			check.Status = CIStatusPending
+			if result.OverallStatus == CIStatusSuccess {
+				result.OverallStatus = CIStatusPending
+			}
+		case "completed":
+			switch strings.ToLower(run.Conclusion) {
+			case "success":
+				check.Status = CIStatusSuccess
+			case "failure", "timed_out":
+				check.Status = CIStatusFailure
+				result.OverallStatus = CIStatusFailure
+			case "cancelled", "skipped":
+				check.Status = CIStatusSuccess // Non-blocking
+			default:
+				check.Status = CIStatusUnknown
+			}
+		}
+
+		result.Checks = append(result.Checks, check)
+	}
+}
+
+// GetCILogs retrieves logs for a Gitea CI run
+func (g *GiteaProvider) GetCILogs(ctx context.Context, repo string, checkRunID int64) (string, error) {
+	// Try Gitea Actions logs first
+	logsPath := fmt.Sprintf("/repos/%s/actions/runs/%d/logs", repo, checkRunID)
+	data, err := g.doRequest(ctx, "GET", logsPath, nil)
+	if err == nil {
+		return string(data), nil
+	}
+
+	// If Actions logs not available, return a message directing to the URL
+	return fmt.Sprintf("Logs not directly available. Check run ID: %d\nView details in Gitea web interface.", checkRunID), nil
 }
