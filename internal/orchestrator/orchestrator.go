@@ -38,7 +38,16 @@ type Orchestrator struct {
 
 // New creates a new orchestrator
 func New(cfg *config.Config, provider providers.Provider, logger *log.Logger) *Orchestrator {
-	claudeClient := claude.NewClient(cfg.Claude.Command, cfg.Claude.Timeout)
+	// Create retry config for infinite retry mode
+	// MaxAttempts: 0 means retry indefinitely for transient errors
+	// Permanent errors (auth failures, invalid requests) always stop immediately
+	infiniteRetryConfig := config.RetryConfig{
+		MaxAttempts:    0, // 0 means infinite retry
+		BackoffBase:    cfg.Retry.BackoffBase,
+		RateLimitRetry: cfg.Retry.RateLimitRetry,
+	}
+
+	claudeClient := claude.NewClientWithRetry(cfg.Claude.Command, cfg.Claude.Timeout, infiniteRetryConfig)
 	sandboxMgr := sandbox.NewManager("")
 
 	// Initialize CI monitor if provider supports it and CI is enabled
