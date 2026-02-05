@@ -225,6 +225,7 @@ func (o *Orchestrator) handleNew(ctx context.Context, repo string, issue *provid
 			return err
 		}
 		o.setLabel(ctx, repo, issue.Number, state.PhaseQuestions)
+		st.LastCommentTime = time.Now()                          // Mark time so we only process new comments from now on
 		reporter.ForceUpdate(ctx, progress.StatusWaitingAnswers) // Persist state with phase change
 	}
 	return nil
@@ -296,6 +297,7 @@ func (o *Orchestrator) handlePlanning(ctx context.Context, repo string, issue *p
 		return err
 	}
 
+	st.LastCommentTime = time.Now() // Mark time so we only process new comments from now on
 	reporter.ForceUpdate(ctx, progress.StatusWaitingApproval)
 	o.setLabel(ctx, repo, issue.Number, state.PhaseApproval)
 	return nil

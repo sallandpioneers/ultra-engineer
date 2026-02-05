@@ -111,6 +111,7 @@ func (r *Reporter) Update(ctx context.Context, status string) error {
 }
 
 // ForceUpdate posts or updates the status comment, bypassing debounce
+// Still skips if status hasn't changed to avoid duplicate entries
 func (r *Reporter) ForceUpdate(ctx context.Context, status string) error {
 	if !r.enabled {
 		return nil
@@ -118,6 +119,11 @@ func (r *Reporter) ForceUpdate(ctx context.Context, status string) error {
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
+
+	// Skip if status hasn't changed (avoid duplicate updates)
+	if status == r.lastStatusMsg {
+		return nil
+	}
 
 	return r.doUpdate(ctx, status)
 }
