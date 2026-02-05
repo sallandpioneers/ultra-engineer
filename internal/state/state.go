@@ -57,6 +57,10 @@ type State struct {
 	DependsOn     []int  `json:"depends_on,omitempty"`     // Issue numbers this issue depends on
 	BlockedBy     []int  `json:"blocked_by,omitempty"`     // Currently blocking issue numbers
 	FailureReason string `json:"failure_reason,omitempty"` // "merge_conflict", "dependency_cycle", "dependency_failed", etc.
+
+	// Progress tracking
+	StatusCommentID int64    `json:"status_comment_id,omitempty"` // ID of the status comment to update
+	StatusHistory   []string `json:"status_history,omitempty"`    // Status entries as "HH:MM:SS|message"
 }
 
 const (

@@ -72,11 +72,9 @@ func (q *QAPhase) AnalyzeIssue(ctx context.Context, issue *providers.Issue, work
 // PostQuestions posts questions as a comment on the issue
 func (q *QAPhase) PostQuestions(ctx context.Context, repo string, issueNum int, questions string, roundNum int, st *state.State) error {
 	commentBody := claude.FormatQuestionsForComment(questions, roundNum)
-	commentWithState, err := st.AppendToBody(commentBody)
-	if err != nil {
-		return err
-	}
-	_, err = q.provider.CreateComment(ctx, repo, issueNum, commentWithState)
+	// State is stored in progress comment, not questions comment
+	commentBody = state.AddBotMarker(commentBody)
+	_, err := q.provider.CreateComment(ctx, repo, issueNum, commentBody)
 	return err
 }
 
