@@ -16,6 +16,7 @@ const (
 	StatusAnalyzing       = "🔍 Analyzing issue and generating questions..."
 	StatusPlanning        = "📝 Creating implementation plan..."
 	StatusPlanReview      = "🔄 Reviewing plan (%d/%d)..."
+	StatusWaitingAnswers  = "❓ Waiting for answers..."
 	StatusWaitingApproval = "⏳ Waiting for approval..."
 	StatusImplementing    = "🔨 Implementing changes..."
 	StatusCodeReview      = "✅ Code review (%d/%d)..."

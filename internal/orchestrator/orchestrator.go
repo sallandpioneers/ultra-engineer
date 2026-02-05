@@ -108,11 +108,28 @@ func (o *Orchestrator) loadState(ctx context.Context, repo string, issueNum int)
 	if err != nil {
 		return nil, err
 	}
-	var bodies []string
+
+	// Find the most recent state and track which comment it came from
+	var latestState *state.State
+	var latestCommentID int64
 	for _, c := range comments {
-		bodies = append(bodies, c.Body)
+		st, err := state.Parse(c.Body)
+		if err != nil {
+			continue
+		}
+		if latestState == nil || st.LastUpdated.After(latestState.LastUpdated) {
+			latestState = st
+			latestCommentID = c.ID
+		}
 	}
-	return state.ParseFromComments(bodies)
+
+	if latestState == nil {
+		return nil, fmt.Errorf("no state found in comments")
+	}
+
+	// Set the comment ID so we can update it instead of creating new comments
+	latestState.StatusCommentID = latestCommentID
+	return latestState, nil
 }
 
 func (o *Orchestrator) runStateMachine(ctx context.Context, repo string, issue *providers.Issue, st *state.State, sb *sandbox.Sandbox) error {
@@ -141,7 +158,8 @@ func (o *Orchestrator) runStateMachine(ctx context.Context, repo string, issue *
 				return o.fail(ctx, repo, issue.Number, st, err, reporter)
 			}
 			if done {
-				return nil // Waiting for user
+				reporter.ForceUpdate(ctx, progress.StatusWaitingAnswers) // Persist state before returning
+				return nil                                               // Waiting for user
 			}
 
 		case state.PhasePlanning:
@@ -155,7 +173,8 @@ func (o *Orchestrator) runStateMachine(ctx context.Context, repo string, issue *
 				return o.fail(ctx, repo, issue.Number, st, err, reporter)
 			}
 			if done {
-				return nil // Waiting for user
+				reporter.ForceUpdate(ctx, progress.StatusWaitingApproval) // Persist state before returning
+				return nil                                                // Waiting for user
 			}
 
 		case state.PhaseImplementing:
@@ -195,6 +214,7 @@ func (o *Orchestrator) handleNew(ctx context.Context, repo string, issue *provid
 	if result.NoMoreQuestions {
 		st.SetPhase(state.PhasePlanning)
 		o.setLabel(ctx, repo, issue.Number, state.PhasePlanning)
+		reporter.ForceUpdate(ctx, progress.StatusPlanning)
 	} else {
 		oldQARound := st.QARound
 		st.QARound = 1
@@ -205,6 +225,7 @@ func (o *Orchestrator) handleNew(ctx context.Context, repo string, issue *provid
 			return err
 		}
 		o.setLabel(ctx, repo, issue.Number, state.PhaseQuestions)
+		reporter.ForceUpdate(ctx, progress.StatusWaitingAnswers) // Persist state with phase change
 	}
 	return nil
 }
@@ -735,6 +756,21 @@ func (o *Orchestrator) CheckForRetry(ctx context.Context, repo string, issue *pr
 	}
 
 	return false
+}
+
+// HasNewComment checks if there are any new comments since the last processed time
+func (o *Orchestrator) HasNewComment(ctx context.Context, repo string, issueNum int, st *state.State) (bool, error) {
+	comments, err := o.provider.GetComments(ctx, repo, issueNum)
+	if err != nil {
+		return false, err
+	}
+
+	for _, c := range comments {
+		if c.CreatedAt.After(st.LastCommentTime) && !state.IsBotComment(c.Body) {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func (o *Orchestrator) setLabel(ctx context.Context, repo string, issueNum int, phase state.Phase) {

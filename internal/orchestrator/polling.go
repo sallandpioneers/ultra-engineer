@@ -230,6 +230,14 @@ func (d *Daemon) filterPendingIssues(ctx context.Context, issues []issueInfo) []
 			}
 		}
 
+		// Skip waiting phases (questions, approval) unless there's new comment activity
+		if st.CurrentPhase == state.PhaseQuestions || st.CurrentPhase == state.PhaseApproval {
+			hasNewComment, _ := d.orchestrator.HasNewComment(ctx, info.repo, info.issue.Number, st)
+			if !hasNewComment {
+				continue // No new activity, skip
+			}
+		}
+
 		// Store state in our tracking map
 		d.allStatesMu.Lock()
 		if d.allStates[info.repo] == nil {
