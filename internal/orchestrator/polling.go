@@ -214,6 +214,11 @@ func (d *Daemon) filterPendingIssues(ctx context.Context, issues []issueInfo) []
 			}
 		}
 
+		// Skip completed issues (state may be updated before labels)
+		if st.CurrentPhase == state.PhaseCompleted {
+			continue
+		}
+
 		// Skip failed issues unless retry was requested
 		if st.CurrentPhase == state.PhaseFailed {
 			if d.orchestrator.CheckForRetry(ctx, info.repo, info.issue, st) {
