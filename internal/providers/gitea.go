@@ -470,7 +470,7 @@ func (g *GiteaProvider) GetPRReviewComments(ctx context.Context, repo string, nu
 func (g *GiteaProvider) MergePR(ctx context.Context, repo string, number int) error {
 	path := fmt.Sprintf("/repos/%s/pulls/%d/merge", repo, number)
 	_, err := g.doRequest(ctx, "POST", path, map[string]string{
-		"do": "merge",
+		"do": "squash", // Use squash to avoid duplicate commits
 	})
 	return err
 }

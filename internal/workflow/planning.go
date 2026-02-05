@@ -66,11 +66,9 @@ func (p *PlanningPhase) GetPlan(workDir string) (string, error) {
 // PostPlan posts the plan for user approval
 func (p *PlanningPhase) PostPlan(ctx context.Context, repo string, issueNum int, plan string, st *state.State) error {
 	commentBody := claude.FormatPlanForComment(plan, p.reviewCycles)
-	commentWithState, err := st.AppendToBody(commentBody)
-	if err != nil {
-		return err
-	}
-	_, err = p.provider.CreateComment(ctx, repo, issueNum, commentWithState)
+	// State is stored in progress comment, not plan comment
+	commentBody = state.AddBotMarker(commentBody)
+	_, err := p.provider.CreateComment(ctx, repo, issueNum, commentBody)
 	return err
 }
 

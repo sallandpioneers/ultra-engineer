@@ -116,13 +116,14 @@ func (o *Orchestrator) loadState(ctx context.Context, repo string, issueNum int)
 }
 
 func (o *Orchestrator) runStateMachine(ctx context.Context, repo string, issue *providers.Issue, st *state.State, sb *sandbox.Sandbox) error {
-	// Create progress reporter for this issue
-	reporter := progress.NewReporter(
+	// Create progress reporter for this issue with state persistence
+	reporter := progress.NewReporterWithState(
 		o.provider,
 		repo,
 		issue.Number,
 		o.config.Progress.DebounceInterval,
 		o.config.Progress.Enabled,
+		st,
 	)
 
 	for {
@@ -257,7 +258,7 @@ func (o *Orchestrator) handlePlanning(ctx context.Context, repo string, issue *p
 	totalCycles := o.config.Claude.ReviewCycles
 	err := o.planPhase.RunFullReviewCycle(ctx, sb.RepoDir, func(i int) {
 		o.logger.Printf("Plan review %d/%d", i, totalCycles)
-		reporter.Update(ctx, progress.FormatPlanReview(i, totalCycles))
+		reporter.ForceUpdate(ctx, progress.FormatPlanReview(i, totalCycles))
 	})
 	if err != nil {
 		return err
@@ -337,7 +338,7 @@ func (o *Orchestrator) handleApproval(ctx context.Context, repo string, issue *p
 		totalCycles := o.config.Claude.ReviewCycles
 		o.planPhase.RunFullReviewCycle(ctx, sb.RepoDir, func(i int) {
 			o.logger.Printf("Plan re-review %d/%d", i, totalCycles)
-			reporter.Update(ctx, progress.FormatPlanReview(i, totalCycles))
+			reporter.ForceUpdate(ctx, progress.FormatPlanReview(i, totalCycles))
 		})
 	}
 
@@ -384,7 +385,7 @@ func (o *Orchestrator) handleImplementing(ctx context.Context, repo string, issu
 	totalCycles := o.config.Claude.ReviewCycles
 	err = o.implPhase.RunFullCodeReviewCycle(ctx, sb, func(i int) {
 		o.logger.Printf("Code review %d/%d", i, totalCycles)
-		reporter.Update(ctx, progress.FormatCodeReview(i, totalCycles))
+		reporter.ForceUpdate(ctx, progress.FormatCodeReview(i, totalCycles))
 	})
 	if err != nil {
 		return err
@@ -392,6 +393,10 @@ func (o *Orchestrator) handleImplementing(ctx context.Context, repo string, issu
 
 	st.SetPhase(state.PhaseReview)
 	o.setLabel(ctx, repo, issue.Number, state.PhaseReview)
+
+	// Update progress comment (state is persisted there)
+	reporter.ForceUpdate(ctx, progress.StatusCreatingPR)
+
 	return nil
 }
 
@@ -418,7 +423,9 @@ func (o *Orchestrator) handleReview(ctx context.Context, repo string, issue *pro
 		// Initialize LastPRCommentTime after PR creation to avoid processing old comments
 		st.LastPRCommentTime = time.Now()
 
-		o.provider.CreateComment(ctx, repo, issue.Number, state.AddBotMarker(fmt.Sprintf("Created PR #%d: %s", st.PRNumber, pr.PR.HTMLURL)))
+		// State is persisted via progress reporter, just post informational comment
+		comment := state.AddBotMarker(fmt.Sprintf("Created PR #%d: %s", st.PRNumber, pr.PR.HTMLURL))
+		o.provider.CreateComment(ctx, repo, issue.Number, comment)
 	}
 
 	// Check for PR feedback (general comments and inline review comments)
@@ -468,17 +475,13 @@ func (o *Orchestrator) handleReview(ctx context.Context, repo string, issue *pro
 			return false, err
 		}
 
-		// Update state BEFORE posting acknowledgment
-		oldTime := st.LastPRCommentTime
+		// Update state and persist via reporter
 		st.LastPRCommentTime = latestTime
+		reporter.ForceUpdate(ctx, "🔧 Addressed PR feedback and pushed changes")
 
-		// Post acknowledgment on the issue with updated state
+		// Post acknowledgment on the issue
 		ackMsg := state.AddBotMarker("Addressed PR feedback and pushed changes.")
-		msgWithState, _ := st.AppendToBody(ackMsg)
-		if _, err := o.provider.CreateComment(ctx, repo, issue.Number, msgWithState); err != nil {
-			st.LastPRCommentTime = oldTime
-			return false, err
-		}
+		o.provider.CreateComment(ctx, repo, issue.Number, ackMsg)
 
 		// Return immediately to wait for CI to run on the new commit
 		return true, nil
@@ -613,12 +616,8 @@ func (o *Orchestrator) handleCIStatus(ctx context.Context, repo string, issue *p
 			// Don't return error, let it try again on next poll
 		}
 
-		// Post progress comment (ignore error - non-critical)
-		comment := fmt.Sprintf("CI failed: %s. Attempting fix (%d/%d)...", checkNameSummary, st.CIFixAttempts, o.config.CI.MaxFixAttempts)
-		msgWithState, _ := st.AppendToBody(state.AddBotMarker(comment))
-		if _, err := o.provider.CreateComment(ctx, repo, issue.Number, msgWithState); err != nil {
-			o.logger.Printf("Warning: failed to post CI fix comment: %v", err)
-		}
+		// Update progress via reporter (state is persisted there)
+		reporter.ForceUpdate(ctx, progress.FormatFixingCI(st.CIFixAttempts, o.config.CI.MaxFixAttempts))
 
 		// Reset wait start time for the new commit
 		st.CIWaitStartTime = time.Now()
@@ -639,9 +638,9 @@ func (o *Orchestrator) fail(ctx context.Context, repo string, issueNum int, st *
 
 	reporter.Finalize(ctx, progress.FormatFailed(err))
 
-	comment := fmt.Sprintf("**Error:**\n```\n%s\n```", err.Error())
-	commentWithState, _ := st.AppendToBody(comment)
-	o.provider.CreateComment(ctx, repo, issueNum, commentWithState)
+	// Post error details (state is persisted via reporter)
+	comment := state.AddBotMarker(fmt.Sprintf("**Error:**\n```\n%s\n```", err.Error()))
+	o.provider.CreateComment(ctx, repo, issueNum, comment)
 	o.setLabel(ctx, repo, issueNum, state.PhaseFailed)
 
 	return err
@@ -673,8 +672,8 @@ func (o *Orchestrator) failWithMergeConflict(ctx context.Context, repo string, i
 	sb.WriteString("2. Push the resolved changes to the branch\n")
 	sb.WriteString("3. Comment `/retry` to re-trigger processing\n")
 
-	commentWithState, _ := st.AppendToBody(sb.String())
-	o.provider.CreateComment(ctx, repo, issueNum, commentWithState)
+	// State is persisted via reporter, just post informational comment
+	o.provider.CreateComment(ctx, repo, issueNum, state.AddBotMarker(sb.String()))
 
 	// Update labels
 	o.setLabel(ctx, repo, issueNum, state.PhaseFailed)
@@ -726,10 +725,9 @@ func (o *Orchestrator) CheckForRetry(ctx context.Context, repo string, issue *pr
 				// React to acknowledge
 				o.provider.ReactToComment(ctx, repo, c.ID, "+1")
 
-				// Post comment about retry with updated state
+				// Post comment about retry (state persisted via progress reporter)
 				comment := state.AddBotMarker("Retrying implementation...")
-				commentWithState, _ := st.AppendToBody(comment)
-				o.provider.CreateComment(ctx, repo, issue.Number, commentWithState)
+				o.provider.CreateComment(ctx, repo, issue.Number, comment)
 
 				return true
 			}
@@ -830,10 +828,9 @@ func (o *Orchestrator) CheckAndUnblockIssues(ctx context.Context, repo string, c
 			st.FailureReason = "dependency_failed"
 			st.Error = fmt.Sprintf("Dependency #%d failed", completedOrFailedIssue)
 
-			// Post comment about the failure
-			comment := fmt.Sprintf("**Blocked:** Dependency #%d failed. This issue cannot proceed until the dependency is resolved.\n\nRetry with `/retry` after fixing the dependency.", completedOrFailedIssue)
-			commentWithState, _ := st.AppendToBody(comment)
-			o.provider.CreateComment(ctx, repo, issueNum, commentWithState)
+			// Post comment about the failure (state persisted via progress reporter)
+			comment := state.AddBotMarker(fmt.Sprintf("**Blocked:** Dependency #%d failed. This issue cannot proceed until the dependency is resolved.\n\nRetry with `/retry` after fixing the dependency.", completedOrFailedIssue))
+			o.provider.CreateComment(ctx, repo, issueNum, comment)
 			o.setLabel(ctx, repo, issueNum, state.PhaseFailed)
 			continue
 		}

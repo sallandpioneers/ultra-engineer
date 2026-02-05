@@ -4,6 +4,7 @@
 
 # Config with secrets
 config.yaml
+config-*.yaml
 
 # IDE
 .idea/
