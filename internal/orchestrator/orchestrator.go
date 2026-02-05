@@ -252,10 +252,11 @@ func (o *Orchestrator) handleQuestions(ctx context.Context, repo string, issue *
 		return true, nil // Wait for user
 	}
 
-	// Check if the comment author is authorized
+	// Check if the comment author is authorized (collaborator or issue author)
 	authorized, _ := security.IsAuthorized(ctx, o.provider, repo, answer.Author, o.logger)
-	if !authorized {
-		// Skip unauthorized comments silently (already logged by IsAuthorized)
+	if !authorized && answer.Author != issue.Author {
+		// Update LastCommentTime to avoid reprocessing the same unauthorized comment
+		st.LastCommentTime = answer.CreatedAt
 		return true, nil // Wait for authorized user
 	}
 
@@ -324,10 +325,11 @@ func (o *Orchestrator) handleApproval(ctx context.Context, repo string, issue *p
 		return true, nil // Wait for user
 	}
 
-	// Check if the comment author is authorized
+	// Check if the comment author is authorized (collaborator or issue author)
 	authorized, _ := security.IsAuthorized(ctx, o.provider, repo, response.Author, o.logger)
-	if !authorized {
-		// Skip unauthorized comments silently (already logged by IsAuthorized)
+	if !authorized && response.Author != issue.Author {
+		// Update LastCommentTime to avoid reprocessing the same unauthorized comment
+		st.LastCommentTime = response.CreatedAt
 		return true, nil // Wait for authorized user
 	}
 
