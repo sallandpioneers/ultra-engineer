@@ -111,7 +111,7 @@ func (r *Reporter) Update(ctx context.Context, status string) error {
 }
 
 // ForceUpdate posts or updates the status comment, bypassing debounce
-// Still skips if status hasn't changed to avoid duplicate entries
+// If status hasn't changed, still persists state but doesn't add duplicate log entry
 func (r *Reporter) ForceUpdate(ctx context.Context, status string) error {
 	if !r.enabled {
 		return nil
@@ -120,9 +120,9 @@ func (r *Reporter) ForceUpdate(ctx context.Context, status string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	// Skip if status hasn't changed (avoid duplicate updates)
+	// If status hasn't changed, persist state without adding duplicate log entry
 	if status == r.lastStatusMsg {
-		return nil
+		return r.persistStateOnly(ctx)
 	}
 
 	return r.doUpdate(ctx, status)
@@ -170,6 +170,22 @@ func (r *Reporter) doUpdate(ctx context.Context, status string) error {
 		if err := r.provider.UpdateComment(ctx, r.repo, r.statusCommentID, body); err != nil {
 			return fmt.Errorf("failed to update status comment: %w", err)
 		}
+	}
+
+	r.lastUpdate = time.Now()
+	return nil
+}
+
+// persistStateOnly updates the comment to persist state changes without adding a new status entry
+// Must be called with lock held
+func (r *Reporter) persistStateOnly(ctx context.Context) error {
+	if r.statusCommentID == 0 || r.st == nil {
+		return nil // Nothing to persist
+	}
+
+	body := r.formatStatusLog()
+	if err := r.provider.UpdateComment(ctx, r.repo, r.statusCommentID, body); err != nil {
+		return fmt.Errorf("failed to persist state: %w", err)
 	}
 
 	r.lastUpdate = time.Now()
