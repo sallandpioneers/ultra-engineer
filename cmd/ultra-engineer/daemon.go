@@ -24,30 +24,35 @@ func daemonCmd() *cobra.Command {
 with the trigger label and processes them automatically.
 
 Supports monitoring multiple repositories concurrently.
+Repositories can be specified via --repo flags or the "repos" field in config.yaml.
 
 Example:
   ultra-engineer daemon --repo owner/repo
   ultra-engineer daemon --repo owner/repo1 --repo owner/repo2`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if len(repos) == 0 {
-				return fmt.Errorf("--repo is required (can be specified multiple times)")
-			}
-
 			return runDaemon(repos)
 		},
 	}
 
 	cmd.Flags().StringArrayVar(&repos, "repo", nil, "Repository to monitor (owner/repo), can be specified multiple times")
-	cmd.MarkFlagRequired("repo")
 
 	return cmd
 }
 
-func runDaemon(repos []string) error {
+func runDaemon(cliRepos []string) error {
 	// Load config
 	cfg, err := config.Load(configPath)
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
+	}
+
+	// CLI flags take precedence; fall back to config repos
+	repos := cliRepos
+	if len(repos) == 0 {
+		repos = cfg.Repos
+	}
+	if len(repos) == 0 {
+		return fmt.Errorf("no repositories specified (use --repo flag or \"repos\" in config.yaml)")
 	}
 
 	// Determine log file path (CLI flag takes precedence over config)
