@@ -13,6 +13,7 @@ type Config struct {
 	PollInterval time.Duration `yaml:"poll_interval"`
 	TriggerLabel string        `yaml:"trigger_label"`
 	LogFile      string        `yaml:"log_file"`
+	Repos        []string      `yaml:"repos"`
 
 	Gitea  GiteaConfig  `yaml:"gitea"`
 	GitHub GitHubConfig `yaml:"github"`

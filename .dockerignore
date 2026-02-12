@@ -1,0 +1,6 @@
+coverage.out
+*.exe
+*.test
+.git
+.github
+docs

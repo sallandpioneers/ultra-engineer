@@ -1,0 +1,17 @@
+services:
+  ultra-engineer:
+    build: .
+    restart: unless-stopped
+    environment:
+      # GitHub provider
+      - GITHUB_TOKEN=${GITHUB_TOKEN}
+      - GH_TOKEN=${GITHUB_TOKEN}
+      # Gitea provider
+      - GITEA_TOKEN=${GITEA_TOKEN}
+    volumes:
+      - ./config.yaml:/home/engineer/config.yaml:ro
+      - workdir:/home/engineer/work
+      - ${HOME}/.claude:/home/engineer/.claude
+
+volumes:
+  workdir:

@@ -9,6 +9,11 @@ poll_interval: 60s
 # Label that triggers processing
 trigger_label: ai-implement
 
+# Repositories to monitor (used by daemon command)
+repos:
+  - owner/repo1
+  # - owner/repo2
+
 # Gitea configuration
 gitea:
   url: https://gitea.example.com
