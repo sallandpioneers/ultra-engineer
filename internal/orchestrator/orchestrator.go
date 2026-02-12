@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"strings"
@@ -535,6 +536,12 @@ func (o *Orchestrator) handleReview(ctx context.Context, repo string, issue *pro
 	if mergeable && o.config.Defaults.AutoMerge {
 		o.logger.Printf("Merging PR #%d", st.PRNumber)
 		if err := o.provider.MergePR(ctx, repo, st.PRNumber); err != nil {
+			if errors.Is(err, providers.ErrMergeNotAllowed) {
+				// Merge not allowed yet (e.g. pending approvals, branch protection).
+				// This is temporary — wait and retry on the next poll cycle.
+				o.logger.Printf("Merge not allowed yet, will retry: %v", err)
+				return true, nil
+			}
 			return false, err
 		}
 		st.SetPhase(state.PhaseCompleted)
