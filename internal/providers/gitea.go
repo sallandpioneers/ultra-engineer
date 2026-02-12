@@ -472,6 +472,15 @@ func (g *GiteaProvider) MergePR(ctx context.Context, repo string, number int) er
 	_, err := g.doRequest(ctx, "POST", path, map[string]string{
 		"do": "squash", // Use squash to avoid duplicate commits
 	})
+	if err != nil {
+		errStr := strings.ToLower(err.Error())
+		// Gitea returns 405 or 409 when merge is not allowed yet (e.g. pending
+		// required approvals, unresolved reviews, branch protection rules).
+		if strings.Contains(errStr, "405") || strings.Contains(errStr, "409") ||
+			strings.Contains(errStr, "not allowed") {
+			return fmt.Errorf("%w: %v", ErrMergeNotAllowed, err)
+		}
+	}
 	return err
 }
 

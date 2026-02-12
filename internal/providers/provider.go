@@ -2,8 +2,14 @@ package providers
 
 import (
 	"context"
+	"errors"
 	"time"
 )
+
+// ErrMergeNotAllowed is returned when a PR cannot be merged yet (e.g. pending
+// required approvals, branch protection rules, etc.). Callers should treat
+// this as a temporary condition and retry later rather than failing permanently.
+var ErrMergeNotAllowed = errors.New("merge not allowed")
 
 // Issue represents an issue from any provider
 type Issue struct {

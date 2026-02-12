@@ -375,6 +375,13 @@ func (g *GitHubProvider) GetPRReviewComments(ctx context.Context, repo string, n
 
 func (g *GitHubProvider) MergePR(ctx context.Context, repo string, number int) error {
 	_, err := g.runGH(ctx, "pr", "merge", strconv.Itoa(number), "--repo", repo, "--merge", "--delete-branch")
+	if err != nil {
+		errStr := strings.ToLower(err.Error())
+		if strings.Contains(errStr, "not allowed") || strings.Contains(errStr, "merge not allowed") ||
+			strings.Contains(errStr, "required status check") || strings.Contains(errStr, "review is required") {
+			return fmt.Errorf("%w: %v", ErrMergeNotAllowed, err)
+		}
+	}
 	return err
 }
 
