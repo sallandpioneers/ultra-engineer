@@ -9,6 +9,11 @@ poll_interval: 60s
 # Label that triggers processing
 trigger_label: ai-implement
 
+# Allowed users (empty = allow all)
+allowed_users:
+  - henkvanmaanen
+  # - another-user
+
 # Repositories to monitor (used by daemon command)
 repos:
   - owner/repo1

@@ -14,6 +14,7 @@ type Config struct {
 	TriggerLabel string        `yaml:"trigger_label"`
 	LogFile      string        `yaml:"log_file"`
 	Repos        []string      `yaml:"repos"`
+	AllowedUsers []string      `yaml:"allowed_users"`
 
 	Gitea  GiteaConfig  `yaml:"gitea"`
 	GitHub GitHubConfig `yaml:"github"`

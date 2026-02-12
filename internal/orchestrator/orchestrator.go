@@ -253,7 +253,7 @@ func (o *Orchestrator) handleQuestions(ctx context.Context, repo string, issue *
 	}
 
 	// Check if the comment author is authorized (collaborator or issue author)
-	authorized, _ := security.IsAuthorized(ctx, o.provider, repo, answer.Author, o.logger)
+	authorized := security.IsAuthorized(o.config.AllowedUsers, answer.Author, o.logger)
 	if !authorized && answer.Author != issue.Author {
 		// Update LastCommentTime to avoid reprocessing the same unauthorized comment
 		st.LastCommentTime = answer.CreatedAt
@@ -326,7 +326,7 @@ func (o *Orchestrator) handleApproval(ctx context.Context, repo string, issue *p
 	}
 
 	// Check if the comment author is authorized (collaborator or issue author)
-	authorized, _ := security.IsAuthorized(ctx, o.provider, repo, response.Author, o.logger)
+	authorized := security.IsAuthorized(o.config.AllowedUsers, response.Author, o.logger)
 	if !authorized && response.Author != issue.Author {
 		// Update LastCommentTime to avoid reprocessing the same unauthorized comment
 		st.LastCommentTime = response.CreatedAt
@@ -477,7 +477,7 @@ func (o *Orchestrator) handleReview(ctx context.Context, repo string, issue *pro
 	for _, c := range allComments {
 		if c.CreatedAt.After(st.LastPRCommentTime) && !state.IsBotComment(c.Body) {
 			// Check authorization before including feedback
-			authorized, _ := security.IsAuthorized(ctx, o.provider, repo, c.Author, o.logger)
+			authorized := security.IsAuthorized(o.config.AllowedUsers, c.Author, o.logger)
 			if !authorized {
 				// Skip unauthorized feedback (already logged by IsAuthorized)
 				continue
@@ -727,7 +727,7 @@ func (o *Orchestrator) CheckForRetry(ctx context.Context, repo string, issue *pr
 			body := strings.TrimSpace(strings.ToLower(c.Body))
 			if body == "/retry" || strings.HasPrefix(body, "/retry ") {
 				// Check if the comment author is authorized
-				authorized, _ := security.IsAuthorized(ctx, o.provider, repo, c.Author, o.logger)
+				authorized := security.IsAuthorized(o.config.AllowedUsers, c.Author, o.logger)
 				if !authorized {
 					// Skip unauthorized retry commands (already logged by IsAuthorized)
 					continue
