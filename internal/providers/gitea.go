@@ -719,13 +719,41 @@ func (g *GiteaProvider) checkCollaboratorOnce(ctx context.Context, repo, usernam
 		// 200/204 = user IS a collaborator
 		return true, nil
 	case http.StatusNotFound:
-		// 404 = user is NOT a collaborator (expected, not an error)
-		return false, nil
+		// 404 = user is not a direct collaborator; check org membership
+		// as org members access repos through teams, not as direct collaborators
+		return g.isOrgMember(ctx, repo, username)
 	default:
 		// Other errors (403, 500, etc.) - return error
 		body, _ := io.ReadAll(resp.Body)
 		return false, fmt.Errorf("API error %d: %s", resp.StatusCode, string(body))
 	}
+}
+
+// isOrgMember checks if a user is a member of the org that owns the repo.
+// Gitea's collaborator API only covers direct collaborators, not org members
+// who access repos through team membership.
+func (g *GiteaProvider) isOrgMember(ctx context.Context, repo, username string) (bool, error) {
+	parts := strings.SplitN(repo, "/", 2)
+	if len(parts) != 2 {
+		return false, nil
+	}
+	org := parts[0]
+
+	url := g.baseURL + "/api/v1/orgs/" + org + "/members/" + username
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return false, fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Authorization", "token "+g.token)
+
+	resp, err := g.client.Do(req)
+	if err != nil {
+		return false, fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// 204 = is a member, 404 = not a member or not an org
+	return resp.StatusCode == http.StatusNoContent || resp.StatusCode == http.StatusOK, nil
 }
 
 // GetCILogs retrieves logs for a Gitea CI run
