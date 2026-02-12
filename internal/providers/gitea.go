@@ -696,11 +696,13 @@ func (g *GiteaProvider) IsCollaborator(ctx context.Context, repo, username strin
 	return g.checkCollaboratorOnce(ctx, repo, username)
 }
 
-// checkCollaboratorOnce checks collaborator status with custom 200/404 handling
+// checkCollaboratorOnce checks if a user has sufficient permissions on a repo.
+// Uses the permission endpoint which covers all access types: direct collaborator,
+// org owner, and team membership.
 func (g *GiteaProvider) checkCollaboratorOnce(ctx context.Context, repo, username string) (bool, error) {
-	url := g.baseURL + "/api/v1/repos/" + repo + "/collaborators/" + username
+	endpoint := g.baseURL + "/api/v1/repos/" + repo + "/collaborators/" + username + "/permission"
 
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", endpoint, nil)
 	if err != nil {
 		return false, fmt.Errorf("failed to create request: %w", err)
 	}
@@ -714,46 +716,27 @@ func (g *GiteaProvider) checkCollaboratorOnce(ctx context.Context, repo, usernam
 	}
 	defer resp.Body.Close()
 
-	switch resp.StatusCode {
-	case http.StatusOK, http.StatusNoContent:
-		// 200/204 = user IS a collaborator
-		return true, nil
-	case http.StatusNotFound:
-		// 404 = user is not a direct collaborator; check org membership
-		// as org members access repos through teams, not as direct collaborators
-		return g.isOrgMember(ctx, repo, username)
-	default:
-		// Other errors (403, 500, etc.) - return error
+	if resp.StatusCode == http.StatusNotFound {
+		return false, nil
+	}
+	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		return false, fmt.Errorf("API error %d: %s", resp.StatusCode, string(body))
 	}
-}
 
-// isOrgMember checks if a user is a member of the org that owns the repo.
-// Gitea's collaborator API only covers direct collaborators, not org members
-// who access repos through team membership.
-func (g *GiteaProvider) isOrgMember(ctx context.Context, repo, username string) (bool, error) {
-	parts := strings.SplitN(repo, "/", 2)
-	if len(parts) != 2 {
+	var result struct {
+		Permission string `json:"permission"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return false, fmt.Errorf("failed to parse permission response: %w", err)
+	}
+
+	switch result.Permission {
+	case "owner", "admin", "write":
+		return true, nil
+	default:
 		return false, nil
 	}
-	org := parts[0]
-
-	url := g.baseURL + "/api/v1/orgs/" + org + "/members/" + username
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
-	if err != nil {
-		return false, fmt.Errorf("failed to create request: %w", err)
-	}
-	req.Header.Set("Authorization", "token "+g.token)
-
-	resp, err := g.client.Do(req)
-	if err != nil {
-		return false, fmt.Errorf("request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	// 204 = is a member, 404 = not a member or not an org
-	return resp.StatusCode == http.StatusNoContent || resp.StatusCode == http.StatusOK, nil
 }
 
 // GetCILogs retrieves logs for a Gitea CI run
